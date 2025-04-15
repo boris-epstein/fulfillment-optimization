@@ -1,0 +1,18 @@
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore virtual environments
+venv/
+.env/
+
+# Ignore large data or output files
+*.csv
+*.log
+*.out
+*.tmp
+*.zip
+
+# Ignore notebooks' outputs (optional)
+*.ipynb_checkpoints/
