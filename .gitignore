@@ -13,6 +13,9 @@ venv/
 *.out
 *.tmp
 *.zip
+*.xlsx
+
+*ipynb
 
 # Ignore notebooks' outputs (optional)
 *.ipynb_checkpoints/

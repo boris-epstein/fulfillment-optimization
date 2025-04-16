@@ -112,9 +112,11 @@ def experiment(
             sample_based_markov_policies[n_train_samples].append(markov_dp.compute_optimal_policy(inventory, T, transition_matrix_estimate))
     
             print('Training E MPB')
-            best_theta, best_gamma = enhanced_MPB.train(inventory, train_sample, budget = 2000)
+            best_theta, best_gamma = enhanced_MPB.train(inventory, train_sample, budget = 5000)
             best_thetas[n_train_samples].append(best_theta)
             best_gammas[n_train_samples].append(best_gamma)
+            print(best_theta)
+            print(best_gamma)
             
             # print(best_theta)
             # print(best_gamma)
@@ -124,15 +126,15 @@ def experiment(
             # best_thetas_dt[n_train_samples].append(best_theta_dt)
             # best_gammas_dt[n_train_samples].append(best_gamma_dt)
             
-            print('Training Static Thresholds')
-            best_thresholds = threhsold_fulfiller.train(inventory, train_sample, budget = 2000)
-            thresholds[n_train_samples].append(best_thresholds)
-            # print(best_thresholds)
+            # print('Training Static Thresholds')
+            # best_thresholds = threhsold_fulfiller.train(inventory, train_sample, budget = 2000)
+            # thresholds[n_train_samples].append(best_thresholds)
+            # # print(best_thresholds)
             
-            print('Training Adaptive Thresholds')
-            adaptive_threshold, threshold_gamma = adaptive_threshold_fulfiller.train(inventory, train_sample, budget = 2000)
-            best_adaptive_thresholds[n_train_samples].append(adaptive_threshold)
-            best_threshold_gammas[n_train_samples].append(threshold_gamma)
+            # print('Training Adaptive Thresholds')
+            # adaptive_threshold, threshold_gamma = adaptive_threshold_fulfiller.train(inventory, train_sample, budget = 2000)
+            # best_adaptive_thresholds[n_train_samples].append(adaptive_threshold)
+            # best_threshold_gammas[n_train_samples].append(threshold_gamma)
             
     
     
@@ -183,7 +185,7 @@ def experiment(
     n_test_samples = len(test_samples)
     j = 0
     for sequence in test_samples:
-        if j%100==0:
+        if j%500==0:
             print(f'Test sample {j}')
         j+=1
         if optimal_policy is not None:
@@ -230,11 +232,11 @@ def experiment(
                 # _, filtered_re_solving_reward, _ = re_solving_fulfiller.fulfill(sequence, initial_inventory, train_sample, re_solving_epochs, filter_samples = True, verbose=False)
                 # filtered_re_solving_rewards[n_train_samples][i] += filtered_re_solving_reward/n_test_samples
                 
-                threshold_reward = threhsold_fulfiller.fulfill(sequence, inventory,thresholds[n_train_samples][i].value)
-                threshold_rewards[n_train_samples][i] += threshold_reward/n_test_samples
+                # threshold_reward = threhsold_fulfiller.fulfill(sequence, inventory,thresholds[n_train_samples][i].value)
+                # threshold_rewards[n_train_samples][i] += threshold_reward/n_test_samples
                 
-                adaptive_threshold_reward = adaptive_threshold_fulfiller.fulfill(sequence, inventory, best_adaptive_thresholds[n_train_samples][i], best_threshold_gammas[n_train_samples][i])
-                adaptive_threshold_rewards[n_train_samples][i] += adaptive_threshold_reward/n_test_samples
+                # adaptive_threshold_reward = adaptive_threshold_fulfiller.fulfill(sequence, inventory, best_adaptive_thresholds[n_train_samples][i], best_threshold_gammas[n_train_samples][i])
+                # adaptive_threshold_rewards[n_train_samples][i] += adaptive_threshold_reward/n_test_samples
                 
                 enhanced_mpb_reward = enhanced_MPB.fulfill(sequence, inventory, best_thetas[n_train_samples][i], best_gammas[n_train_samples][i])
                 enhanced_mpb_rewards[n_train_samples][i] += enhanced_mpb_reward/n_test_samples
@@ -274,10 +276,10 @@ def experiment(
         print(f'iid dp: {np.mean(iid_data_driven_reward[n_train_samples])}')
         print(f'indep_dp: {np.mean(indep_data_driven_reward[n_train_samples])}')
         print(f'Markov_dp: {np.mean(markov_data_driven_reward[n_train_samples])}')
-        print(f'Static Thresholds: {np.mean(threshold_rewards[n_train_samples])}')
+        # print(f'Static Thresholds: {np.mean(threshold_rewards[n_train_samples])}')
         print(f'Enhanced MPB: {np.mean(enhanced_mpb_rewards[n_train_samples])}')
         # print(f'Demand-Tracking MPB: {np.mean(dt_mpb_rewards[n_train_samples])}')
-        print(f'Adaptive Thresholds: {np.mean(adaptive_threshold_rewards[n_train_samples])}')
+        # print(f'Adaptive Thresholds: {np.mean(adaptive_threshold_rewards[n_train_samples])}')
 
         print('')
 
@@ -287,12 +289,12 @@ def main(demand_model):
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    train_sample_sizes = [1, 10, 100, 1000]#, 100, 500]#, 500, 1000, 5000]
+    train_sample_sizes = [1, 5, 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
     n_samples_per_size = 10
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
-    n_test_samples = 1000
+    n_test_samples = 5000
     
     T = 12
     
@@ -404,4 +406,4 @@ def main(demand_model):
 if __name__ == '__main__':
 
     # main('markov')
-    main('markov')
+    main('rw')
