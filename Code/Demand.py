@@ -244,6 +244,44 @@ class MarkovianGenerator:
         return Sequence(requests)          
             
         
+class HiddenMarkovGenerator:
+    
+    def __init__(self,
+                 T: int,
+                 demand_nodes,
+                 states: List[int],
+                 state_distribution: Dict[int, List[float]],
+                 initial_distribution: List[float],
+                 transition_matrix : np.array,
+                 seed: int = 0,
+                 ):
+        
+        self.states = states
+        self.demand_nodes = demand_nodes
+        self.state_distribution = state_distribution
+        self.initial_distribution = initial_distribution
+        self.transition_matrix = transition_matrix
+        self.seed = seed
+        self.rng = np.random.default_rng(seed = seed)
+        self.T = T
+        
+    def generate_sequence(self):
+        arrival_times = np.arange(1/(self.T+1),1, 1/(self.T+1))
+        reqs = []
+        
+        current_state = self.rng.choice(a = self.states,p = self.initial_distribution)
+        
+        # latest_arrival = self.rng.choice(a = self.demand_nodes, p = self.initial_distribution)
+        
+        for t in range(self.T):
+            
+            latest_arrival = self.rng.choice(a = self.demand_nodes, p = self.state_distribution[current_state])
+            reqs.append(latest_arrival)
+            current_state = self.rng.choice(a = self.states, p = self.transition_matrix[current_state,:])
+        
+        requests = [ Request(reqs[t],arrival_times[t]) for t in range(self.T) ]
+
+        return Sequence(requests)
 
 class RandomDistributionGenerator:
     def __init__(self, seed = 0):
@@ -307,6 +345,7 @@ if __name__=='__main__':
     #     print(seq)
     
     demand_nodes = [0,1,2]
+    
     # p = {}
     # p[0] = [1/2,0, 1/2]
     # p[1] = [1, 0, 0]
@@ -335,7 +374,28 @@ if __name__=='__main__':
     #     print(seq.leftover_aggregate_demand)
 
 
-    dist_generator = RandomDistributionGenerator(seed = 0)
-    print(dist_generator.generate_indep(len(demand_nodes), 5, bias = [2,0,0]))
-    print(dist_generator.generate_markov(len(demand_nodes), 3))
-        
+    states = [0,1,2]
+    initial_distribution = [1, 0, 0]
+    
+    transition_matrix = np.array(
+        [[0, 1/2, 1/2],
+        [0, 1, 0],
+        [0, 0, 1]]
+    )
+    state_distribution = {}
+    
+    state_distribution[0] = [1/2, 1/2, 0]
+    state_distribution[1] = [1/2, 1/2, 0]
+    state_distribution[2] = [0 , 0, 1]
+    
+    T = 5
+    
+    generator = HiddenMarkovGenerator(T,demand_nodes, states, state_distribution,initial_distribution,transition_matrix, seed = 0)
+    for _ in range(16):
+        sequence = generator.generate_sequence()
+        print(sequence)    
+
+    # dist_generator = RandomDistributionGenerator(seed = 0)
+    # print(dist_generator.generate_indep(len(demand_nodes), 5, bias = [2,0,0]))
+    # print(dist_generator.generate_markov(len(demand_nodes), 3))
+    

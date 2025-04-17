@@ -715,8 +715,10 @@ class LpReSolvingFulfillment:
     def fulfill(self,
                 sequence: Sequence,
                 inventory: Inventory,
+                initial_dual_solution: Dict[int, float],
                 train_sample: List[Sequence],
-                re_solving_epochs: List[int] = [0],
+                linear_program: str = 'offline',
+                re_solving_epochs: List[int] = None,
                 filter_samples = False,
                 verbose=False,
                 ):
@@ -730,7 +732,7 @@ class LpReSolvingFulfillment:
         current_epoch_index = 0
         next_epoch = re_solving_epochs[current_epoch_index]
         
-        
+        dual_variables = initial_dual_solution
         
         current_inventories = inventory.initial_inventory.copy()
         
@@ -819,6 +821,8 @@ class LpReSolvingFulfillment:
             #otherwise, return the whole sample
             # print(f'returned original sample')
             return train_sample
+                
+                
                 
 
 class DualMirrorDescentFulfillment:
