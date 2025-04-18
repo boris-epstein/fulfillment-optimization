@@ -7,7 +7,7 @@ from Demand import TemporalIndependenceGenerator, RWGenerator, MarkovianGenerato
 # from LearningPolicy import DepletionAwarePolicy, train_depletion_policy, extract_reward_matrix, SubscriptableDepletionPolicyWrapper, train_depletion_policy_black_box, train_depletion_nn_policy, NNPolicyWrapper
 from ModelFree import ThresholdsFulfillment, TimeSupplyEnhancedMPB, DemandTrackingMPB, AdaptiveThresholdsFulfillment
 # from NNPolicy import OnlineMatchingPolicy, evaluate_policy_with_params,create_and_train_policy_ng
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from collections import defaultdict
 import numpy as np
@@ -40,7 +40,52 @@ class PolicyOutput:
         self.test_times = test_times
         self.policy_name = policy_name
 
+class OutputWriter:
+    
+    def __init__(self,
+                data_agnostic_policies:List[str],
+                model_based_dynamic_programs: List[str],
+                model_free_parametrized_policies: List[str],
+                num_instances: int,
+                train_sample_sizes: List[int],
+                num_samples_per_size : int,
+                results: Dict[int, Dict[Any, PolicyOutput]]
+                ):
+        
+        self.data_agnostic_policies = data_agnostic_policies
+        self.model_based_dynamic_programs = model_based_dynamic_programs
+        self.num_instances = num_instances
+        self.model_free_parametrized_policies = model_free_parametrized_policies
+        self.train_sample_sizes = train_sample_sizes
+        self.results = results
+        
+        self.num_samples_per_size =num_samples_per_size
+        
+    def write_output(self, path):
+        
+        with open(path, 'w', newline='') as csv_file:
+            spamwriter = csv.writer(csv_file, delimiter =',')
+            spamwriter.writerow(['instance_id', 'policy_name', 'sample_size', 'sample_id', 'average_test_reward', 'training_time', 'average_testing_time'])
+        
+        
+            
+        
+            for instance_id in range(self.num_instances):
+                
+                for policy in self.data_agnostic_policies:
+                    spamwriter.writerow([instance_id, policy, 0, 0, self.results[instance_id][policy].rewards, self.results[instance_id][policy].train_times, self.results[instance_id][policy].test_times])
+                
+                for policy in self.model_based_dynamic_programs + self.model_free_parametrized_policies:
+                
+                    for num_samples in self.train_sample_sizes:
+                        for sample_id in range(self.num_samples_per_size):
+                            
+                                spamwriter.writerow([instance_id, policy, num_samples, sample_id, self.results[instance_id][policy][num_samples].rewards[sample_id], self.results[instance_id][policy][num_samples].train_times[sample_id], self.results[instance_id][policy][num_samples].test_times[sample_id]])
+                
 
+
+
+  
 class Experiment:
     
     def __init__(self,
@@ -301,8 +346,8 @@ def main(demand_model):
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    train_sample_sizes = [ 200]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 4
+    train_sample_sizes = [ 5, 10]#, 100, 500]#, 500, 1000, 5000]
+    n_samples_per_size = 2
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
@@ -445,6 +490,9 @@ def main(demand_model):
 
         results[i] = experiment.conduct_experiment()
         
+        
+    writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, num_instances, train_sample_sizes,n_samples_per_size,results)
+    writer.write_output('test.csv')
 
     for instance in range(num_instances):
         instance_results = results[instance]
