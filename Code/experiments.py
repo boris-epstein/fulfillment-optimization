@@ -202,17 +202,17 @@ class Experiment:
             rewards[n_train_samples] = [0 for _ in range(self.n_samples_per_size)]
         
         
-        test_times = {}
+        test_times = defaultdict(list)
         
-        for sequence in self.test_samples:
-            for n_train_samples in self.train_sample_sizes:
+        
+        for n_train_samples in self.train_sample_sizes:
+            
+            for i in range(self.n_samples_per_size):
                 start = time.time()
-                for i in range(self.n_samples_per_size):
-                    
-                    
+                for sequence in self.test_samples:
                     reward = enhanced_MPB.fulfill(sequence, self.inventory, best_thetas[n_train_samples][i], best_gammas[n_train_samples][i])
                     rewards[n_train_samples][i] += reward/self.n_test_samples
-                test_times[n_train_samples] = (time.time()-start)/self.n_test_samples
+                test_times[n_train_samples].append( (time.time()-start)/self.n_test_samples )
                 
                 
         
@@ -264,17 +264,18 @@ class Experiment:
         
         dp_fulfiller = PolicyFulfillment(self.graph)
         
-        test_times = {}
+        test_times = defaultdict(list)
         
         
         for n_train_samples in self.train_sample_sizes:
             
+           
             for i in range(self.n_samples_per_size):
                 start = time.time()
                 for sequence in self.test_samples:
                     _, reward, _ = dp_fulfiller.fulfill(sequence, self.inventory, estimated_policy[n_train_samples][i].optimal_action)
                     rewards[n_train_samples][i] += reward/self.n_test_samples
-                test_times[n_train_samples] = (time.time()-start)/self.n_test_samples
+                test_times[n_train_samples].append( (time.time()-start)/self.n_test_samples ) 
                 
         
         policy_output = {}
