@@ -5,7 +5,7 @@ from FulfillmentOptimization import Fulfillment, Inventory, PolicyFulfillment, M
 from ModelBased import IndependentDynamicProgram, ModelEstimator, MarkovianDynamicProgram
 from Demand import TemporalIndependenceGenerator, RWGenerator, MarkovianGenerator, Sequence, RandomDistributionGenerator
 # from LearningPolicy import DepletionAwarePolicy, train_depletion_policy, extract_reward_matrix, SubscriptableDepletionPolicyWrapper, train_depletion_policy_black_box, train_depletion_nn_policy, NNPolicyWrapper
-from ModelFree import ThresholdsFulfillment, EnhancedMPB, DemandTrackingMPB, AdaptiveThresholdsFulfillment
+from ModelFree import ThresholdsFulfillment, TimeSupplyEnhancedMPB, DemandTrackingMPB, AdaptiveThresholdsFulfillment
 # from NNPolicy import OnlineMatchingPolicy, evaluate_policy_with_params,create_and_train_policy_ng
 from typing import Dict, List
 
@@ -46,7 +46,8 @@ class Experiment:
     def __init__(self,
         graph: Graph,
         data_agnostic_policies:List[str],
-        data_driven_policies: List[str],
+        model_based_dynamic_programs: List[str],
+        model_free_parametrized_policies: List[str],
         train_sample_sizes: List[int],
         train_samples: Dict[int, List[List[Sequence]]],
         test_samples: List[Sequence],
@@ -56,7 +57,8 @@ class Experiment:
     ):
         self.graph = graph
         self.data_agnostic_policies = data_agnostic_policies
-        self.data_driven_policies = data_driven_policies
+        self.model_based_dynamic_programs = model_based_dynamic_programs
+        self.model_free_parametrized_policies = model_free_parametrized_policies
         self.train_sample_sizes = train_sample_sizes
         self.train_samples = train_samples
         self.test_samples = test_samples
@@ -98,22 +100,14 @@ class Experiment:
         # DP Based algorithms
         self.estimator = ModelEstimator(self.graph)
         
-        if 'iid_dp' in self.data_driven_policies:
-            indep_dp = IndependentDynamicProgram(self.graph)
-            instance_results['iid_dp'] = self.process_dp('iid_dp',indep_dp)
+        for policy in self.model_based_dynamic_programs:
+            instance_results[policy] = self.process_dp(policy)
+        
+        # Model free policies
 
-
-        if 'indep_dp' in self.data_driven_policies:
-            indep_dp = IndependentDynamicProgram(self.graph)
-            instance_results['indep_dp'] = self.process_dp('indep_dp', indep_dp)
-            
-        if 'markov_dp' in self.data_driven_policies:
-            markov_dp = MarkovianDynamicProgram(self.graph)
-            instance_results['markov_dp'] = self.process_dp('markov_dp', markov_dp)
-
-        if 'enhanced_balance' in self.data_driven_policies:
-            
-            instance_results['enhanced_balance'] = self.process_enhanced_balance()
+        for policy in self.model_free_parametrized_policies:
+            instance_results[policy] = self.process_model_free(policy)
+        
 
         
         
@@ -174,14 +168,14 @@ class Experiment:
     
     ## MODEL FREE
     
-    def process_enhanced_balance(self):
+    def process_model_free(self, policy: str):
         
         train_times = defaultdict(list)
         
-        best_thetas = defaultdict(list)
-        best_gammas = defaultdict(list)
+        best_parameters = defaultdict(list)
         
-        enhanced_MPB = EnhancedMPB(self.graph)
+        if policy =='time-supply_enhanced_balance':
+            fulfiller = TimeSupplyEnhancedMPB(self.graph)
         
         for n_train_samples in self.train_sample_sizes:
             for sample_id in range(self.n_samples_per_size):
@@ -189,9 +183,9 @@ class Experiment:
                 train_sample = self.train_samples[n_train_samples][sample_id]
                 
                 start = time.time()
-                best_theta, best_gamma = enhanced_MPB.train(self.inventory, train_sample, budget = self.training_budget)
-                best_thetas[n_train_samples].append(best_theta)
-                best_gammas[n_train_samples].append(best_gamma)
+                best_param = fulfiller.train(self.inventory, train_sample, budget = self.training_budget)
+                best_parameters[n_train_samples].append(best_param)
+                
                 
                 train_times[n_train_samples].append(time.time()-start)
         
@@ -210,7 +204,7 @@ class Experiment:
             for i in range(self.n_samples_per_size):
                 start = time.time()
                 for sequence in self.test_samples:
-                    reward = enhanced_MPB.fulfill(sequence, self.inventory, best_thetas[n_train_samples][i], best_gammas[n_train_samples][i])
+                    reward = fulfiller.fulfill(sequence, self.inventory, best_parameters[n_train_samples][i])
                     rewards[n_train_samples][i] += reward/self.n_test_samples
                 test_times[n_train_samples].append( (time.time()-start)/self.n_test_samples )
                 
@@ -219,13 +213,27 @@ class Experiment:
         policy_output = {}
             
         for n_train_samples in self.train_sample_sizes:
-            policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples,'enhanced_balance')
+            policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples, policy)
         
         return policy_output
     
     ## MODEL BASED
     
-    def process_dp(self,dp_name,dp_solver):
+    def process_dp(self,dp_name):
+        
+        if dp_name == 'iid_dp':
+            dp_solver = IndependentDynamicProgram(self.graph)
+            
+
+
+        if dp_name == 'indep_dp':
+            dp_solver = IndependentDynamicProgram(self.graph)
+            
+            
+        if dp_name == 'markov_dp':
+            dp_solver = MarkovianDynamicProgram(self.graph)
+            
+        
         
         estimated_distribution = defaultdict(list)
         estimated_policy = defaultdict(list)
@@ -293,17 +301,19 @@ def main(demand_model):
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    train_sample_sizes = [ 5, 10]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 2
+    train_sample_sizes = [ 200]#, 100, 500]#, 500, 1000, 5000]
+    n_samples_per_size = 4
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
     data_agnostic_policies = ['myopic', 'balance']
-    data_driven_policies = ['iid_dp', 'indep_dp', 'markov_dp', 'enhanced_balance']
+    model_based_dynamic_programs = ['iid_dp', 'indep_dp', 'markov_dp']#, 'time_enhanced_balance', 'supply_enhanced_balance']
+    
+    model_free_parametrized_policies = ['time-supply_enhanced_balance']
     
     n_test_samples = 500
     
-    training_budget = 500
+    training_budget = 1000
     
     T = 12
     
@@ -409,7 +419,8 @@ def main(demand_model):
             experiment = Experiment(
                 graph,
                 data_agnostic_policies,
-                data_driven_policies,
+                model_based_dynamic_programs,
+                model_free_parametrized_policies,
                 train_sample_sizes,
                 train_samples[i],
                 test_samples[i],
@@ -422,7 +433,8 @@ def main(demand_model):
             experiment = Experiment(
                 graph,
                 data_agnostic_policies,
-                data_driven_policies,
+                model_based_dynamic_programs,
+                model_free_parametrized_policies,
                 train_sample_sizes,
                 train_samples[i],
                 test_samples[i],
@@ -445,7 +457,21 @@ def main(demand_model):
             print('')
             print('')
             
-        for policy in data_driven_policies:
+           
+            
+        for policy in model_based_dynamic_programs:     
+            print(policy)
+            print('')
+            for n_train_samples in train_sample_sizes:
+                print(f'Number of train samples: {n_train_samples}')
+                print(f'Average reward: {instance_results[policy][n_train_samples].rewards}')
+                print(f'Train time:  {instance_results[policy][n_train_samples].train_times}')
+                print(f'Test time:  {instance_results[policy][n_train_samples].test_times}')
+                print('')
+        
+        
+        
+        for policy in  model_free_parametrized_policies:
             print(policy)
             print('')
             for n_train_samples in train_sample_sizes:
