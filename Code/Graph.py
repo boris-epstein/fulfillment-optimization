@@ -143,7 +143,15 @@ class RandomGraphGenerator:
     def __init__(self, seed: int = 0):
         self.rng = np.random.default_rng(seed=seed)
     
-    def two_valued_vertex_graph(self, num_supply_nodes: int, num_demand_nodes:int, vertex_values: Dict[int,List[int]]) -> Graph:
+    def two_valued_vertex_graph(self, num_supply_nodes: int, num_demand_nodes:int, given_vertex_values = None) -> Graph:
+        
+        if given_vertex_values is None:
+            vertex_values = {}
+            for i in range(num_supply_nodes):
+                vertex_values[i] = sorted( [self.rng.uniform(), self.rng.uniform()])
+        
+        else:
+            vertex_values = given_vertex_values
         
         graph = Graph()
         
