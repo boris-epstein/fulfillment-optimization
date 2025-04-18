@@ -49,6 +49,7 @@ class OutputWriter:
                 num_instances: int,
                 train_sample_sizes: List[int],
                 num_samples_per_size : int,
+                include_optimal: bool,
                 results: Dict[int, Dict[Any, PolicyOutput]]
                 ):
         
@@ -61,6 +62,8 @@ class OutputWriter:
         
         self.num_samples_per_size =num_samples_per_size
         
+        self.include_optimal = include_optimal
+        
     def write_output(self, path):
         
         with open(path, 'w', newline='') as csv_file:
@@ -71,6 +74,9 @@ class OutputWriter:
             
         
             for instance_id in range(self.num_instances):
+                
+                if self.include_optimal:
+                    spamwriter.writerow([instance_id, 'optimal', 0, 0, self.results[instance_id]['optimal'].rewards, self.results[instance_id]['optimal'].train_times, self.results[instance_id]['optimal'].test_times])
                 
                 for policy in self.data_agnostic_policies:
                     spamwriter.writerow([instance_id, policy, 0, 0, self.results[instance_id][policy].rewards, self.results[instance_id][policy].train_times, self.results[instance_id][policy].test_times])
@@ -90,6 +96,8 @@ class Experiment:
     
     def __init__(self,
         graph: Graph,
+        demand_model: str,
+        instance_id: int,
         data_agnostic_policies:List[str],
         model_based_dynamic_programs: List[str],
         model_free_parametrized_policies: List[str],
@@ -100,6 +108,9 @@ class Experiment:
         training_budget,
         optimal_policy = None,
     ):
+        
+        self.demand_model = demand_model
+        self.instance_id = instance_id
         self.graph = graph
         self.data_agnostic_policies = data_agnostic_policies
         self.model_based_dynamic_programs = model_based_dynamic_programs
@@ -126,6 +137,11 @@ class Experiment:
         T = len(self.test_samples[0])
         n_samples_per_size = len(self.train_samples[self.train_sample_sizes[0]])
         
+        
+        ### OPTIMAL POLICY
+        
+        if self.optimal_policy is not None:
+            instance_results['optimal'] = self.process_optimal()
         
         
         ### DATA AGNOSTIC ALGORITHMS
@@ -162,6 +178,23 @@ class Experiment:
     
     
     ## DATA AGNOSTIC
+    
+    def process_optimal(self):
+        
+        dp_fulfiller = PolicyFulfillment(self.graph)
+        
+        rewards = 0
+        start = time.time()
+        for sequence in self.test_samples:
+            _, reward, _ = dp_fulfiller.fulfill(sequence, self.inventory, self.optimal_policy.optimal_action)
+            rewards += reward/self.n_test_samples
+        
+        test_time = time.time() - start
+        
+        policy_output = PolicyOutput(rewards, 0, test_time, 0, 'optimal')
+        
+        return policy_output
+        
     
     def process_myopic(self):
         start = time.time()
@@ -219,8 +252,13 @@ class Experiment:
         
         best_parameters = defaultdict(list)
         
+        
+        start = time.time()
+        
         if policy =='time-supply_enhanced_balance':
             fulfiller = TimeSupplyEnhancedMPB(self.graph)
+        
+        setup_time = time.time() - start
         
         for n_train_samples in self.train_sample_sizes:
             for sample_id in range(self.n_samples_per_size):
@@ -232,7 +270,7 @@ class Experiment:
                 best_parameters[n_train_samples].append(best_param)
                 
                 
-                train_times[n_train_samples].append(time.time()-start)
+                train_times[n_train_samples].append( time.time()-start + setup_time)
         
         
         
@@ -338,7 +376,8 @@ class Experiment:
         
         return policy_output
                 
-                
+        
+        
 
 
 
@@ -346,8 +385,10 @@ def main(demand_model):
     n_supply_nodes = 3
     n_demand_nodes = 15
     
+    num_instances = 5
+    
     train_sample_sizes = [ 5, 10]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 2
+    n_samples_per_size = 5
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
@@ -362,20 +403,23 @@ def main(demand_model):
     
     T = 12
     
-    vertex_values = {}
-    vertex_values[0] = [0.1, 0.9]
-    vertex_values[1] = [0.4, 0.6]
-    vertex_values[2] = [0.7,0.91]
+    # vertex_values = {}
+    # vertex_values[0] = [0.1, 0.9]
+    # vertex_values[1] = [0.4, 0.6]
+    # vertex_values[2] = [0.7,0.91]
     
-    vertex_values[3] = [0.59,0.89]
+    # vertex_values[3] = [0.59,0.89]
     
     graph_generator_seed = 0
     distribution_generator_seed = 1
     train_generator_seed = 2
     test_generator_seed = 3
     
-    num_instances = 2
     
+    include_optimal = False
+    
+    if demand_model =='indep' or demand_model =='markov':
+        include_optimal = True
     
     graph_generator = RandomGraphGenerator(seed = graph_generator_seed)
     dist_generator = RandomDistributionGenerator(seed = distribution_generator_seed)
@@ -384,9 +428,9 @@ def main(demand_model):
     optimal_policies = {}
     
     
-    for i in range(num_instances):
+    for instance_id in range(num_instances):
     
-        graph = graph_generator.two_valued_vertex_graph(n_supply_nodes, n_demand_nodes, vertex_values)
+        graph = graph_generator.two_valued_vertex_graph(n_supply_nodes, n_demand_nodes)
         myopic_scores = {(edge.supply_node_id, edge.demand_node_id): edge.reward for edge in graph.edges.values()}
         
         graph.construct_priority_list( 'myopic', myopic_scores, allow_rejections=False)
@@ -396,14 +440,14 @@ def main(demand_model):
             distribution = p
             indep_dp = IndependentDynamicProgram(graph)
             optimal_policy = indep_dp.compute_optimal_policy(inventory, T, p)
-            optimal_policies[i] = optimal_policy
+            optimal_policies[instance_id] = optimal_policy
         
         elif demand_model == 'markov':
             initial_distribution, transition_matrix = dist_generator.generate_markov(n_demand_nodes, 2)
             distribution = (initial_distribution, transition_matrix)
             markov_dp = MarkovianDynamicProgram(graph)
             optimal_policy = markov_dp.compute_optimal_policy(inventory, T, transition_matrix)
-            optimal_policies[i] = optimal_policy
+            optimal_policies[instance_id] = optimal_policy
         
         
         elif demand_model =='rw':
@@ -412,7 +456,7 @@ def main(demand_model):
             # train_generator = RWGenerator(T, demand_node_list, seed = train_generator_seed, step_size = step_size)
             # test_generator = RWGenerator(T, demand_node_list, seed = test_generator_seed, step_size = step_size)
         
-        instances[i] = Instance(graph, deepcopy(distribution), demand_model)
+        instances[instance_id] = Instance(graph, deepcopy(distribution), demand_model)
         
     
     
@@ -429,10 +473,10 @@ def main(demand_model):
     
     results = {}
     
-    for i in range(num_instances):
-        print(f'Instance {i}')
+    for instance_id in range(num_instances):
+        print(f'Instance {instance_id}')
         
-        instance = instances[i]
+        instance = instances[instance_id]
         
         graph = instance.graph
         print(graph.edges)
@@ -453,46 +497,50 @@ def main(demand_model):
             train_generator = RWGenerator(T, demand_node_list, seed = train_generator_seed, step_size= step_size)
             test_generator = RWGenerator(T, demand_node_list, seed = test_generator_seed, step_size= step_size)
         
-        train_samples[i] = defaultdict(list)
+        train_samples[instance_id] = defaultdict(list)
         for n_train_samples in train_sample_sizes:
             for _ in range(n_samples_per_size):
-                train_samples[i][n_train_samples].append( [train_generator.generate_sequence() for _ in range(n_train_samples)])
+                train_samples[instance_id][n_train_samples].append( [train_generator.generate_sequence() for _ in range(n_train_samples)])
                 
-        test_samples[i] = [test_generator.generate_sequence() for _ in range(n_test_samples)]
+        test_samples[instance_id] = [test_generator.generate_sequence() for _ in range(n_test_samples)]
 
         if demand_model == 'indep' or demand_model == 'markov':
             experiment = Experiment(
                 graph,
+                demand_model,
+                instance_id,
                 data_agnostic_policies,
                 model_based_dynamic_programs,
                 model_free_parametrized_policies,
                 train_sample_sizes,
-                train_samples[i],
-                test_samples[i],
+                train_samples[instance_id],
+                test_samples[instance_id],
                 inventory,
                 training_budget,
-                optimal_policies[i]
+                optimal_policies[instance_id]
             )
             # results[i] = experiment(graph,train_sample_sizes, train_samples[i], test_samples[i], inventory, optimal_policies[i])
         else:
             experiment = Experiment(
                 graph,
+                demand_model,
+                instance_id,
                 data_agnostic_policies,
                 model_based_dynamic_programs,
                 model_free_parametrized_policies,
                 train_sample_sizes,
-                train_samples[i],
-                test_samples[i],
+                train_samples[instance_id],
+                test_samples[instance_id],
                 inventory,
                 training_budget,
             )
             # results[i] = experiment(graph,train_sample_sizes, train_samples[i], test_samples[i], inventory)
 
-        results[i] = experiment.conduct_experiment()
+        results[instance_id] = experiment.conduct_experiment()
         
         
-    writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, num_instances, train_sample_sizes,n_samples_per_size,results)
-    writer.write_output('test.csv')
+    writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, num_instances, train_sample_sizes,n_samples_per_size, include_optimal, results)
+    writer.write_output(f'{demand_model}_test2.csv')
 
     for instance in range(num_instances):
         instance_results = results[instance]
