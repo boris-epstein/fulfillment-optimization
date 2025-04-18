@@ -266,12 +266,12 @@ class Experiment:
         
         test_times = {}
         
-        for sequence in self.test_samples:
-            for n_train_samples in self.train_sample_sizes:
+        
+        for n_train_samples in self.train_sample_sizes:
+            
+            for i in range(self.n_samples_per_size):
                 start = time.time()
-                for i in range(self.n_samples_per_size):
-                    
-                    
+                for sequence in self.test_samples:
                     _, reward, _ = dp_fulfiller.fulfill(sequence, self.inventory, estimated_policy[n_train_samples][i].optimal_action)
                     rewards[n_train_samples][i] += reward/self.n_test_samples
                 test_times[n_train_samples] = (time.time()-start)/self.n_test_samples
