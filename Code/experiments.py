@@ -126,10 +126,14 @@ class Experiment:
         self.n_test_samples = len(test_samples)
         self.training_budget = training_budget
         self.T = len(test_samples[0])
+        
+        self.math_progs = MathPrograms(self.graph)
+
 
     def conduct_experiment(self) -> Dict[any, PolicyOutput]:
         
         instance_results = {}
+        
         
         myopic_scores = {(edge.supply_node_id, edge.demand_node_id): edge.reward for edge in self.graph.edges.values()}
         self.graph.construct_priority_list( 'myopic', myopic_scores, allow_rejections=False)
@@ -140,8 +144,16 @@ class Experiment:
         
         ### OPTIMAL POLICY
         
+        
         if self.optimal_policy is not None:
             instance_results['optimal'] = self.process_optimal()
+        
+        
+        ### OFFLINE POLICY
+        
+        if 'offline' in self.data_agnostic_policies:
+            
+            instance_results['offline'] = self.process_offline()
         
         
         ### DATA AGNOSTIC ALGORITHMS
@@ -178,6 +190,20 @@ class Experiment:
     
     
     ## DATA AGNOSTIC
+    
+    
+    def process_offline(self):
+        
+        start = time.time()
+        offline_lp, _ = self.math_progs.offline_linear_program_fixed_inventory(self.test_samples, self.inventory)
+        offline_lp.optimize()
+        off_time = time.time() - start
+    
+        
+        policy_output = PolicyOutput(offline_lp.ObjVal/self.n_test_samples, 0, off_time, 0, 'offline')
+        
+        return policy_output
+
     
     def process_optimal(self):
         
@@ -385,14 +411,14 @@ def main(demand_model):
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 5
+    num_instances = 4
     
     train_sample_sizes = [ 5, 10]#, 100, 500]#, 500, 1000, 5000]
     n_samples_per_size = 5
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
-    data_agnostic_policies = ['myopic', 'balance']
+    data_agnostic_policies = ['myopic', 'balance', 'offline']
     model_based_dynamic_programs = ['iid_dp', 'indep_dp', 'markov_dp']#, 'time_enhanced_balance', 'supply_enhanced_balance']
     
     model_free_parametrized_policies = ['time-supply_enhanced_balance']
@@ -540,7 +566,7 @@ def main(demand_model):
         
         
     writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, num_instances, train_sample_sizes,n_samples_per_size, include_optimal, results)
-    writer.write_output(f'{demand_model}_test2.csv')
+    writer.write_output(f'{demand_model}_test3.csv')
 
     for instance in range(num_instances):
         instance_results = results[instance]
