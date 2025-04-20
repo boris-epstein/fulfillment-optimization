@@ -212,12 +212,85 @@ class TimeSupplyEnhancedMPB(MultiPriceBalanceFulfillment):
         self.best_gamma = best_params[m]
 
         return best_params
+
+class SupplyEnhancedMPB(MultiPriceBalanceFulfillment):
+    
+    def __init__(self, graph: Graph):
+        super().__init__(graph)
+        self.graph = graph
+        self.num_parameters = len(graph.supply_nodes)
+        
+
+    def fulfill(self, sequence: Sequence, inventory: Inventory, theta_list: list[float]) -> float:
+        
+        m = len(self.graph.supply_nodes)
+        
+        
+        
+        current_inventory = inventory.initial_inventory.copy()
+        total_reward = 0
+        T = len(sequence)
+        for t, request in enumerate(sequence.requests):
+            j = request.demand_node
+            best_score = -float('inf')
+            chosen_supply = -1
+
+            for i in self.graph.demand_nodes[j].neighbors:
+                if current_inventory[i] <= 0:
+                    continue
+
+                used_fraction = 1.0 - current_inventory[i] / inventory.initial_inventory[i]
+                base_cost = self.phi(i, used_fraction)
+                cost = (base_cost + theta_list[i])
+                score = self.graph.edges[(i, j)].reward - cost
+
+                if score > best_score:
+                    best_score = score
+                    chosen_supply = i
+
+            if chosen_supply != -1 and best_score >= 0:
+                current_inventory[chosen_supply] -= 1
+                total_reward += self.graph.edges[(chosen_supply, j)].reward
+
+        return total_reward
+
+    def _evaluate(self, theta_list: list[float], inventory: Inventory, sequences: List[Sequence]) -> float:
+        # m = len(self.graph.supply_nodes)
+        # theta_list = theta_and_gamma[:m]
+        # gamma = theta_and_gamma[m]
+
+        total_reward = 0.0
+        for sequence in sequences:
+            reward = self.fulfill(sequence, inventory, theta_list)
+            total_reward += reward
+
+        return total_reward / len(sequences) if sequences else 0.0
+
+    def train(self, inventory: Inventory, sequences: List[Sequence], optimizer_name="DE", budget=500):
+        m = len(self.graph.supply_nodes)
+        init = [0.0] * m 
+
+        param = ng.p.Array(init=init)
+        param.set_bounds(lower=[-3.0] * m , upper=[3.0] * m )
+
+
+        optimizer_cls = ng.optimizers.registry[optimizer_name]
+        optimizer = optimizer_cls(parametrization=param, budget=budget)
+
+        best = optimizer.minimize(lambda x: -self._evaluate(x, inventory, sequences))
+        best_params = best.value
+        self.best_thetas = best_params
+        
+
+        return best_params
+
     
 class TimeEnhancedMPB(MultiPriceBalanceFulfillment):
     
     def __init__(self, graph: Graph):
         super().__init__(graph)
         self.graph = graph
+        self.num_parameters = 1
         
 
     def fulfill(self, sequence: Sequence, inventory: Inventory, gamma: float) -> float:
@@ -249,8 +322,6 @@ class TimeEnhancedMPB(MultiPriceBalanceFulfillment):
         return total_reward
 
     def _evaluate(self,gamma: float, inventory: Inventory, sequences: List[Sequence]) -> float:
-       
-        
         
 
         total_reward = 0.0
@@ -276,7 +347,7 @@ class TimeEnhancedMPB(MultiPriceBalanceFulfillment):
         
         self.best_gamma = best_params[0]
 
-        return self.best_thetas, self.best_gamma
+        return self.best_gamma
     
 class DemandTrackingMPB(TimeSupplyEnhancedMPB):
     def fulfill(self, sequence: Sequence, inventory: Inventory, theta_list: List[float], gamma: float, beta_list: List[float]) -> float:

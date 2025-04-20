@@ -5,7 +5,8 @@ from FulfillmentOptimization import Fulfillment, Inventory, PolicyFulfillment, M
 from ModelBased import IndependentDynamicProgram, ModelEstimator, MarkovianDynamicProgram
 from Demand import TemporalIndependenceGenerator, RWGenerator, MarkovianGenerator, Sequence, RandomDistributionGenerator
 # from LearningPolicy import DepletionAwarePolicy, train_depletion_policy, extract_reward_matrix, SubscriptableDepletionPolicyWrapper, train_depletion_policy_black_box, train_depletion_nn_policy, NNPolicyWrapper
-from ModelFree import ThresholdsFulfillment, TimeSupplyEnhancedMPB, DemandTrackingMPB, AdaptiveThresholdsFulfillment
+from ModelFree import ThresholdsFulfillment, TimeSupplyEnhancedMPB, DemandTrackingMPB, AdaptiveThresholdsFulfillment, TimeEnhancedMPB, SupplyEnhancedMPB
+
 # from NNPolicy import OnlineMatchingPolicy, evaluate_policy_with_params,create_and_train_policy_ng
 from typing import Any, Dict, List
 
@@ -283,6 +284,11 @@ class Experiment:
         
         if policy =='time-supply_enhanced_balance':
             fulfiller = TimeSupplyEnhancedMPB(self.graph)
+            
+        if policy == 'time_enhanced_balance':
+            fulfiller = TimeEnhancedMPB(self.graph)
+        if policy == 'supply_enhanced_balance':
+            fulfiller = SupplyEnhancedMPB(self.graph)
         
         setup_time = time.time() - start
         
@@ -411,17 +417,17 @@ def main(demand_model):
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 4
+    num_instances = 8
     
-    train_sample_sizes = [ 5, 10]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 5
+    train_sample_sizes = [ 10, 100, 1000]#, 100, 500]#, 500, 1000, 5000]
+    n_samples_per_size = 10
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
     data_agnostic_policies = ['myopic', 'balance', 'offline']
     model_based_dynamic_programs = ['iid_dp', 'indep_dp', 'markov_dp']#, 'time_enhanced_balance', 'supply_enhanced_balance']
     
-    model_free_parametrized_policies = ['time-supply_enhanced_balance']
+    model_free_parametrized_policies = ['time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance']
     
     n_test_samples = 500
     
