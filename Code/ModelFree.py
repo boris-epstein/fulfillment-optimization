@@ -146,6 +146,7 @@ class TimeSupplyEnhancedMPB(MultiPriceBalanceFulfillment):
     def __init__(self, graph: Graph):
         super().__init__(graph)
         self.graph = graph
+        self.num_parameters = len(graph.supply_nodes) + 1
         
 
     def fulfill(self, sequence: Sequence, inventory: Inventory, theta_and_gamma: list[float]) -> float:

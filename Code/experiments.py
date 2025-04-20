@@ -105,7 +105,7 @@ class Experiment:
         train_samples: Dict[int, List[List[Sequence]]],
         test_samples: List[Sequence],
         inventory: Inventory,
-        training_budget,
+        training_budget_per_parameter: int,
         optimal_policy = None,
     ):
         
@@ -124,7 +124,7 @@ class Experiment:
         self.n_samples_per_size = len(train_samples[train_sample_sizes[0]])
         
         self.n_test_samples = len(test_samples)
-        self.training_budget = training_budget
+        self.training_budget_per_parameter = training_budget_per_parameter
         self.T = len(test_samples[0])
         
         self.math_progs = MathPrograms(self.graph)
@@ -292,7 +292,7 @@ class Experiment:
                 train_sample = self.train_samples[n_train_samples][sample_id]
                 
                 start = time.time()
-                best_param = fulfiller.train(self.inventory, train_sample, budget = self.training_budget)
+                best_param = fulfiller.train(self.inventory, train_sample, budget = self.training_budget_per_parameter * fulfiller.num_parameters)
                 best_parameters[n_train_samples].append(best_param)
                 
                 
@@ -425,7 +425,7 @@ def main(demand_model):
     
     n_test_samples = 500
     
-    training_budget = 1000
+    training_budget_per_parameter = 100
     
     T = 12
     
@@ -542,7 +542,7 @@ def main(demand_model):
                 train_samples[instance_id],
                 test_samples[instance_id],
                 inventory,
-                training_budget,
+                training_budget_per_parameter,
                 optimal_policies[instance_id]
             )
             # results[i] = experiment(graph,train_sample_sizes, train_samples[i], test_samples[i], inventory, optimal_policies[i])
@@ -558,7 +558,7 @@ def main(demand_model):
                 train_samples[instance_id],
                 test_samples[instance_id],
                 inventory,
-                training_budget,
+                training_budget_per_parameter,
             )
             # results[i] = experiment(graph,train_sample_sizes, train_samples[i], test_samples[i], inventory)
 
