@@ -7,6 +7,12 @@ from typing import List
 import nevergrad as ng
 import numpy as np
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+import numpy as np
+
 
 class ThresholdsFulfillment:
     
@@ -421,3 +427,119 @@ class DemandTrackingMPB(TimeSupplyEnhancedMPB):
         self.best_betas = best_params[m + 1:]
 
         return self.best_thetas, self.best_gamma, self.best_betas
+    
+    
+    
+    
+
+
+class NeuralOpportunityCostPolicy:
+    def __init__(self, graph: Graph):
+        """Initialize the policy with a given supply/demand graph and define the neural network."""
+        
+        self.graph = graph
+        self.supply_ids = sorted(graph.supply_nodes.keys())
+        self.demand_ids = sorted(graph.demand_nodes.keys())
+        self.num_supply = len(self.supply_ids)
+        self.num_demand = len(self.demand_ids)
+        
+        input_dim = self.num_supply + 2 * self.num_demand + 1
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, 16),
+            nn.ReLU(),
+            nn.Linear(16, 1),
+            nn.Sigmoid()
+        )
+        self.num_parameters = sum(p.numel() for p in self.model.parameters())
+    
+    def _set_weights_from_vector(self, weight_vector: np.ndarray):
+        """Internal helper to load a flat weight vector into the model's parameters."""
+        # Ensure the incoming vector is a NumPy array of correct dtype
+        vector = np.array(weight_vector, dtype=np.float32)
+        idx = 0
+        for param in self.model.parameters():
+            param_shape = param.data.shape
+            param_size = param.data.numel()
+            # Reshape the slice of the vector to the parameter's shape and copy it
+            param.data.copy_(torch.from_numpy(vector[idx: idx + param_size].reshape(param_shape)))
+            idx += param_size
+
+    def _evaluate(self, weight_vector: np.ndarray, inventory: Inventory, sequences: List[Sequence]) -> float:
+        """Evaluate the average reward over a list of sequences for a given weight vector."""
+        # Set the network weights for this evaluation
+        self._set_weights_from_vector(weight_vector)
+        total_reward = 0.0
+        for seq in sequences:
+            # Simulate fulfillment for this sequence with current weights
+            reward = self.fulfill(seq, inventory, weight_vector)
+            total_reward += reward
+        # Return average reward across sequences
+        return total_reward / len(sequences) if sequences else 0.0
+
+    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1000):
+        """
+        Train the neural opportunity cost network using Nevergrad to maximize average reward on train_samples.
+        Returns the best weight vector found.
+        """
+        # Flatten initial model parameters to a NumPy array to use as starting point
+        init_params = np.concatenate([p.detach().cpu().numpy().ravel() for p in self.model.parameters()]).astype(np.float32)
+        # Set up Nevergrad parameter array (with optional bounds for stability)
+        param = ng.p.Array(init=init_params).set_bounds(lower=-5.0, upper=5.0)
+        optimizer = ng.optimizers.registry[optimizer_name](parametrization=param, budget=budget)
+        # Nevergrad minimize expects a function to *minimize*. We maximize reward by minimizing negative reward.
+        best_candidate = optimizer.minimize(lambda w: -self._evaluate(w.value if hasattr(w, "value") else w, inventory, train_samples))
+        # Extract the best found weight vector
+        best_weights = best_candidate.value if hasattr(best_candidate, "value") else best_candidate
+        return best_weights
+
+    def fulfill(self, sequence: Sequence, inventory: Inventory, weight_vector: np.ndarray) -> float:
+        self._set_weights_from_vector(weight_vector)
+        current_inventory = inventory.initial_inventory.copy()
+        total_reward = 0.0
+        demand_counts = {j: 0 for j in self.demand_ids}
+        T = len(sequence)
+
+        with torch.no_grad():
+            for t, request in enumerate(sequence.requests):
+                j = request.demand_node
+                demand_counts[j] += 1
+                time_fraction = t / T if T > 0 else 0.0
+
+                # Compute feature parts
+                used_fractions = [
+                    (inventory.initial_inventory[i] - current_inventory[i]) / inventory.initial_inventory[i]
+                    if inventory.initial_inventory[i] > 0 else 0.0
+                    for i in self.supply_ids
+                ]
+                demand_fractions = [demand_counts[jp] / (t + 1) for jp in self.demand_ids]
+
+                best_score = 0.0
+                chosen_i = None
+
+                for i in self.graph.demand_nodes[j].neighbors:
+                    if current_inventory[i] <= 0:
+                        continue
+
+                    # Rewards for all j' ∈ demand nodes from i
+                    reward_vector = []
+                    for jp in self.demand_ids:
+                        reward_vector.append(self.graph.edges[(i, jp)].reward if (i, jp) in self.graph.edges else 0.0)
+
+                    # Build context
+                    x = used_fractions + reward_vector + demand_fractions + [time_fraction]
+                    x_tensor = torch.tensor(x, dtype=torch.float32)
+                    opportunity_cost = self.model(x_tensor).item()
+
+                    r_ij = self.graph.edges[(i, j)].reward
+                    net_score = r_ij - opportunity_cost
+                    if net_score > best_score:
+                        best_score = net_score
+                        chosen_i = i
+
+                if chosen_i is not None and best_score > 0:
+                    current_inventory[chosen_i] -= 1
+                    total_reward += self.graph.edges[(chosen_i, j)].reward
+
+        return total_reward
