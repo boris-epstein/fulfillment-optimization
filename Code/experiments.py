@@ -216,7 +216,7 @@ class Experiment:
             _, reward, _ = dp_fulfiller.fulfill(sequence, self.inventory, self.optimal_policy.optimal_action)
             rewards += reward/self.n_test_samples
         
-        test_time = time.time() - start
+        test_time = (time.time() - start)/self.n_test_samples
         
         policy_output = PolicyOutput(rewards, 0, test_time, 0, 'optimal')
         
@@ -419,8 +419,8 @@ def main(demand_model):
     
     num_instances = 8
     
-    train_sample_sizes = [ 10, 100, 1000]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 10
+    train_sample_sizes = [ 5, 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
+    n_samples_per_size = 5
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
@@ -429,9 +429,9 @@ def main(demand_model):
     
     model_free_parametrized_policies = ['time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance']
     
-    n_test_samples = 500
+    n_test_samples = 5000
     
-    training_budget_per_parameter = 100
+    training_budget_per_parameter = 120
     
     T = 12
     
@@ -572,7 +572,7 @@ def main(demand_model):
         
         
     writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, num_instances, train_sample_sizes,n_samples_per_size, include_optimal, results)
-    writer.write_output(f'{demand_model}_test3.csv')
+    writer.write_output(f'{demand_model}_first_trial.csv')
 
     for instance in range(num_instances):
         instance_results = results[instance]
@@ -613,4 +613,4 @@ def main(demand_model):
 if __name__ == '__main__':
 
     # main('markov')
-    main('markov')
+    main('indep')
