@@ -429,14 +429,9 @@ class DemandTrackingMPB(TimeSupplyEnhancedMPB):
         return self.best_thetas, self.best_gamma, self.best_betas
     
     
-    
-    
-
 
 class NeuralOpportunityCostPolicy:
     def __init__(self, graph: Graph, seed: int = 42):
-        """Initialize the policy with a given supply/demand graph and define the neural network."""
-        
         self.graph = graph
         self.supply_ids = sorted(graph.supply_nodes.keys())
         self.demand_ids = sorted(graph.demand_nodes.keys())
@@ -444,30 +439,68 @@ class NeuralOpportunityCostPolicy:
         self.num_demand = len(self.demand_ids)
         self.rng = np.random.default_rng(seed)
         self.seed = seed
-        
-        input_dim = self.num_supply + 2 * self.num_demand + 1
 
-        
+        # Only 3 inputs now
         self.model = nn.Sequential(
-            nn.Linear(input_dim, 8),
+            nn.Linear(3, 8),
             nn.ReLU(),
             nn.Linear(8, 1),
             nn.Sigmoid()
         )
         self.num_parameters = sum(p.numel() for p in self.model.parameters())
+
+
+    def fulfill(self, sequence: Sequence, inventory: Inventory, weight_vector: np.ndarray) -> float:
+        self._set_weights_from_vector(weight_vector)
+        current_inventory = inventory.initial_inventory.copy()
+        total_reward = 0.0
+        demand_counts = {j: 0 for j in self.demand_ids}
+        T = len(sequence)
+
+        with torch.no_grad():
+            for t, request in enumerate(sequence.requests):
+                j = request.demand_node
+                demand_counts[j] += 1
+                time_fraction = t / T if T > 0 else 0.0
+
+                # Compute empirical demand frequencies d_{j't}
+                djt = {jp: demand_counts[jp] / (t + 1) for jp in self.demand_ids}
+
+                best_score = 0.0
+                chosen_i = None
+
+                for i in self.graph.demand_nodes[j].neighbors:
+                    if current_inventory[i] <= 0:
+                        continue
+
+                    # x₁: used fraction
+                    used_frac = (inventory.initial_inventory[i] - current_inventory[i]) / inventory.initial_inventory[i]
+
+                    # x₃: opportunity-weighted demand for more valuable connections
+                    r_ij = self.graph.edges[(i, j)].reward
+                    future_value = sum(
+                        self.graph.edges[(i, jp)].reward * djt[jp]
+                        for jp in self.demand_ids
+                        if (i, jp) in self.graph.edges and self.graph.edges[(i, jp)].reward > r_ij
+                    )
+
+                    x = [used_frac, time_fraction, future_value]
+                    x_tensor = torch.tensor(x, dtype=torch.float32)
+                    opportunity_cost = self.model(x_tensor).item()
+
+                    net_score = r_ij - opportunity_cost
+                    if net_score > best_score:
+                        best_score = net_score
+                        chosen_i = i
+
+                if chosen_i is not None and best_score > 0:
+                    current_inventory[chosen_i] -= 1
+                    total_reward += self.graph.edges[(chosen_i, j)].reward
+
+        return total_reward
+
         
 
-    def _set_weights_from_vector(self, weight_vector: np.ndarray):
-        """Internal helper to load a flat weight vector into the model's parameters."""
-        # Ensure the incoming vector is a NumPy array of correct dtype
-        vector = np.array(weight_vector, dtype=np.float32)
-        idx = 0
-        for param in self.model.parameters():
-            param_shape = param.data.shape
-            param_size = param.data.numel()
-            # Reshape the slice of the vector to the parameter's shape and copy it
-            param.data.copy_(torch.from_numpy(vector[idx: idx + param_size].reshape(param_shape)))
-            idx += param_size
 
     def _set_weights_from_vector(self, weight_vector: np.ndarray):
         vector = np.array(weight_vector, dtype=np.float32)
@@ -497,7 +530,7 @@ class NeuralOpportunityCostPolicy:
         return sum(rewards) / num_batches
 
 
-    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1000, max_samples: int = 20, num_batches: int = 3):
+    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1000, max_samples: int = 100, num_batches: int = 1):
         init_params = np.concatenate([p.detach().cpu().numpy().ravel() for p in self.model.parameters()]).astype(np.float32)
         param = ng.p.Array(init=init_params).set_bounds(lower=-5.0, upper=5.0)
         optimizer = ng.optimizers.registry[optimizer_name](parametrization=param, budget=budget)
@@ -506,6 +539,37 @@ class NeuralOpportunityCostPolicy:
             lambda w: -self._evaluate(w.value if hasattr(w, "value") else w, inventory, train_samples, max_samples, num_batches)
         )
         return best_candidate.value if hasattr(best_candidate, "value") else best_candidate
+
+
+class NeuralOpportunityCostWithIDPolicy:
+    def __init__(self, graph: Graph, seed: int = 42):
+        self.graph = graph
+        self.supply_ids = sorted(graph.supply_nodes.keys())
+        self.demand_ids = sorted(graph.demand_nodes.keys())
+        self.num_supply = len(self.supply_ids)
+        self.num_demand = len(self.demand_ids)
+        self.rng = np.random.default_rng(seed)
+        self.seed = seed
+
+        input_dim = self.num_supply + 3  # one-hot + 3 features
+
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 8),
+            nn.ReLU(),
+            nn.Linear(8, 1),
+            nn.Sigmoid()
+        )
+        self.num_parameters = sum(p.numel() for p in self.model.parameters())
+        
+
+    def _set_weights_from_vector(self, weight_vector: np.ndarray):
+        vector = np.array(weight_vector, dtype=np.float32)
+        idx = 0
+        for param in self.model.parameters():
+            shape = param.data.shape
+            size = param.data.numel()
+            param.data.copy_(torch.from_numpy(vector[idx: idx + size].reshape(shape)))
+            idx += size
 
     def fulfill(self, sequence: Sequence, inventory: Inventory, weight_vector: np.ndarray) -> float:
         self._set_weights_from_vector(weight_vector)
@@ -520,13 +584,8 @@ class NeuralOpportunityCostPolicy:
                 demand_counts[j] += 1
                 time_fraction = t / T if T > 0 else 0.0
 
-                # Compute feature parts
-                used_fractions = [
-                    (inventory.initial_inventory[i] - current_inventory[i]) / inventory.initial_inventory[i]
-                    if inventory.initial_inventory[i] > 0 else 0.0
-                    for i in self.supply_ids
-                ]
-                demand_fractions = [demand_counts[jp] / (t + 1) for jp in self.demand_ids]
+                # Compute empirical demand frequencies d_{j't}
+                djt = {jp: demand_counts[jp] / (t + 1) for jp in self.demand_ids}
 
                 best_score = 0.0
                 chosen_i = None
@@ -535,17 +594,24 @@ class NeuralOpportunityCostPolicy:
                     if current_inventory[i] <= 0:
                         continue
 
-                    # Rewards for all j' ∈ demand nodes from i
-                    reward_vector = []
-                    for jp in self.demand_ids:
-                        reward_vector.append(self.graph.edges[(i, jp)].reward if (i, jp) in self.graph.edges else 0.0)
+                    used_frac = (inventory.initial_inventory[i] - current_inventory[i]) / inventory.initial_inventory[i]
+                    r_ij = self.graph.edges[(i, j)].reward
 
-                    # Build context
-                    x = used_fractions + reward_vector + demand_fractions + [time_fraction]
+                    future_value = sum(
+                        self.graph.edges[(i, jp)].reward * djt[jp]
+                        for jp in self.demand_ids
+                        if (i, jp) in self.graph.edges and self.graph.edges[(i, jp)].reward > r_ij
+                    )
+
+                    # One-hot encode the supply node i
+                    one_hot = [0.0] * self.num_supply
+                    idx = self.supply_ids.index(i)
+                    one_hot[idx] = 1.0
+
+                    x = one_hot + [used_frac, time_fraction, future_value]
                     x_tensor = torch.tensor(x, dtype=torch.float32)
                     opportunity_cost = self.model(x_tensor).item()
 
-                    r_ij = self.graph.edges[(i, j)].reward
                     net_score = r_ij - opportunity_cost
                     if net_score > best_score:
                         best_score = net_score
@@ -556,3 +622,29 @@ class NeuralOpportunityCostPolicy:
                     total_reward += self.graph.edges[(chosen_i, j)].reward
 
         return total_reward
+
+    def _evaluate(self, weight_vector: np.ndarray, inventory: Inventory, sequences: List[Sequence], max_samples: int, num_batches: int) -> float:
+        self._set_weights_from_vector(weight_vector)
+        rewards = []
+        for _ in range(num_batches):
+            if len(sequences) > max_samples:
+                sample_subset = list(self.rng.choice(sequences, size=max_samples, replace=False))
+            else:
+                sample_subset = sequences
+
+            total_reward = 0.0
+            for seq in sample_subset:
+                total_reward += self.fulfill(seq, inventory, weight_vector)
+            rewards.append(total_reward / len(sample_subset))
+
+        return sum(rewards) / num_batches
+
+    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1000, max_samples: int = 100, num_batches: int = 1):
+        init_params = np.concatenate([p.detach().cpu().numpy().ravel() for p in self.model.parameters()]).astype(np.float32)
+        param = ng.p.Array(init=init_params).set_bounds(lower=-5.0, upper=5.0)
+        optimizer = ng.optimizers.registry[optimizer_name](parametrization=param, budget=budget)
+
+        best_candidate = optimizer.minimize(
+            lambda w: -self._evaluate(w.value if hasattr(w, "value") else w, inventory, train_samples, max_samples, num_batches)
+        )
+        return best_candidate.value if hasattr(best_candidate, "value") else best_candidate
