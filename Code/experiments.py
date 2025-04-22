@@ -1,4 +1,11 @@
 import time
+import logging
+import os
+import hashlib
+from datetime import datetime
+
+
+
 
 from Graph import Graph, RandomGraphGenerator
 from FulfillmentOptimization import Fulfillment, Inventory, PolicyFulfillment, MultiPriceBalanceFulfillment, BalanceFulfillment, FluLpReSolvingFulfillment
@@ -16,6 +23,34 @@ import csv
 from copy import deepcopy
 from MathPrograms import MathPrograms
 
+
+def generate_experiment_id(demand_model: str) -> str:
+    now = datetime.now().isoformat()
+    hash_id = hashlib.md5(now.encode()).hexdigest()[:8]  # short hash
+    return f"{demand_model}_{hash_id}"
+
+
+def setup_logging(experiment_id):
+    log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+
+
+    log_path = os.path.join(log_dir, f"{experiment_id}.log")
+
+    logging.basicConfig(
+        filename=log_path,
+        filemode='a',  # append mode
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+    )
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    console.setFormatter(formatter)
+    logging.getLogger().addHandler(console)
+
+
+
 class Instance:
     """
     Should include a graph and a distribution
@@ -27,6 +62,7 @@ class Instance:
         self.distribution = distribution
         
  
+
 class PolicyOutput:
     """
     class dedicated to store the performance obtained by a specific policy in all train sets for a specific instance
@@ -40,6 +76,25 @@ class PolicyOutput:
         self.train_times = train_times
         self.test_times = test_times
         self.policy_name = policy_name
+
+
+
+
+def log_data_agnostic_result(instance_id, policy_output: PolicyOutput):
+    logging.info(f'{instance_id},{policy_output.policy_name},{policy_output.train_set_size},0,{policy_output.rewards},{policy_output.train_times},{policy_output.test_times}')
+    
+    
+
+def log_data_driven_result(instance_id, policy_outputs: Dict[int,PolicyOutput], train_sample_sizes):
+    
+    for n_train_samples in train_sample_sizes:
+        policy_output = policy_outputs[n_train_samples]
+        for sample_id in range(len(policy_output.rewards)):
+            
+            logging.info(f'{instance_id},{policy_output.policy_name},{policy_output.train_set_size},{sample_id},{policy_output.rewards[sample_id]},{policy_output.train_times[sample_id]},{policy_output.test_times[sample_id]}')
+        
+            # policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples, policy)
+
 
 class OutputWriter:
     
@@ -298,6 +353,8 @@ class Experiment:
         
         policy_output = PolicyOutput(rewards, train_time, test_time, 0, 'balance')
         
+        log_data_agnostic_result(self.instance_id, policy_output)
+        
         return policy_output
     
     
@@ -363,6 +420,8 @@ class Experiment:
             
         for n_train_samples in self.train_sample_sizes:
             policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples, policy)
+        
+        log_data_driven_result(self.instance_id, policy_output, self.train_sample_sizes)
         
         return policy_output
     
@@ -440,6 +499,8 @@ class Experiment:
         for n_train_samples in self.train_sample_sizes:
             policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples,dp_name)
         
+        log_data_driven_result(self.instance_id, policy_output, self.train_sample_sizes)
+        
         return policy_output
                 
     
@@ -450,7 +511,7 @@ class Experiment:
     
     def process_fluid_lp_resolving(self):
         
-        re_solving_epochs = [0,1,2,3,4,5,6,7,8,9,10,11]
+        re_solving_epochs = [2,5,9]
         
         initial_dual_variables = defaultdict(list)
         backwards_cumulative_average_demand = defaultdict(list)
@@ -497,17 +558,24 @@ class Experiment:
         for n_train_samples in self.train_sample_sizes:
             policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples,'fluid_lp_resolving')
         
+        log_data_driven_result(self.instance_id, policy_output, self.train_sample_sizes)
         return policy_output
 
 
 def main(demand_model):
+    
+    
+    
+    experiment_id = generate_experiment_id(demand_model)
+    setup_logging(experiment_id)
+    
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 5
+    num_instances = 2
     
-    train_sample_sizes = [ 100, 500]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 5
+    train_sample_sizes = [ 5, 10]#, 100, 500]#, 500, 1000, 5000]
+    n_samples_per_size = 2
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
@@ -535,6 +603,31 @@ def main(demand_model):
     distribution_generator_seed = 1
     train_generator_seed = 2
     test_generator_seed = 3
+    
+    logging.info('experiment metadata')
+    logging.info(f'graph_generator_seed={graph_generator_seed}')
+    logging.info(f'distribution_generator_seed={distribution_generator_seed}')
+    logging.info(f'train_generator_seed={train_generator_seed}')
+    logging.info(f'test_generator_seed={test_generator_seed}')
+    
+    
+    
+    logging.info(f'T = {T}')
+    logging.info(f'demand_model = {demand_model}')
+    logging.info(f'n_supply_nodes = {n_supply_nodes}')
+    logging.info(f'n_demand_nodes = {n_demand_nodes}')
+    
+    logging.info(f'n_instances = {num_instances}')
+    logging.info(f'train_sample_sizes = {train_sample_sizes}')
+    logging.info(f'n_test_samples = {n_test_samples}')
+    logging.info(f'training_budget_per_parameter = {training_budget_per_parameter}')
+    
+    logging.info(f'data_agnostic_policies = {data_agnostic_policies}')
+    logging.info(f'model_based_dynamic_programs = {model_based_dynamic_programs}')
+    logging.info(f'model_free_parametrized_policies = {model_free_parametrized_policies}')
+    logging.info(f'lp_resolving_policies = {lp_resolving_policies}')
+    
+    
     
     
     include_optimal = False
@@ -594,13 +687,16 @@ def main(demand_model):
     
     results = {}
     
+    
+    logging.info('instance_id,policy_name,sample_size,sample_id,average_test_reward,training_time,average_testing_time')
+    
     for instance_id in range(num_instances):
-        print(f'Instance {instance_id}')
+        
         
         instance = instances[instance_id]
         
         graph = instance.graph
-        print(graph.edges)
+
         demand_node_list = [demand_node_id for demand_node_id in graph.demand_nodes]
         
         if demand_model =='markov':
@@ -663,42 +759,8 @@ def main(demand_model):
         
         
     writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, lp_resolving_policies, num_instances, train_sample_sizes,n_samples_per_size, include_optimal, results)
-    writer.write_output(f'{demand_model}_fluid_test.csv')
+    writer.write_output(f'{experiment_id}.csv')
 
-    for instance in range(num_instances):
-        instance_results = results[instance]
-        
-        for policy in data_agnostic_policies:
-            print(policy)
-            print(f'Average reward: {instance_results[policy].rewards}')
-            print(f'Train time:  {instance_results[policy].train_times}')
-            print(f'Test time:  {instance_results[policy].test_times}')
-            print('')
-            print('')
-            
-           
-            
-        for policy in model_based_dynamic_programs:     
-            print(policy)
-            print('')
-            for n_train_samples in train_sample_sizes:
-                print(f'Number of train samples: {n_train_samples}')
-                print(f'Average reward: {instance_results[policy][n_train_samples].rewards}')
-                print(f'Train time:  {instance_results[policy][n_train_samples].train_times}')
-                print(f'Test time:  {instance_results[policy][n_train_samples].test_times}')
-                print('')
-        
-        
-        
-        for policy in  model_free_parametrized_policies:
-            print(policy)
-            print('')
-            for n_train_samples in train_sample_sizes:
-                print(f'Number of train samples: {n_train_samples}')
-                print(f'Average reward: {instance_results[policy][n_train_samples].rewards}')
-                print(f'Train time:  {instance_results[policy][n_train_samples].train_times}')
-                print(f'Test time:  {instance_results[policy][n_train_samples].test_times}')
-                print('')
             
 
 if __name__ == '__main__':
