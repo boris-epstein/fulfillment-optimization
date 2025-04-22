@@ -9,7 +9,7 @@ class MathPrograms:
     def __init__(self, graph: Graph):
         self.graph = graph
         
-    def fluid_linear_program_fixed_inventory(self, average_demand : Dict[int, float], inventory, scaling_factor: float = 1.0):
+    def fluid_linear_program_fixed_inventory(self, average_demand : Dict[int, float], inventory, scaling_factor: float = 1.0, demand_node_id_to_add_1: int = None):
         model = gp.Model('Fluid_fixed_inventory')
 
         # VARIABLES
@@ -24,7 +24,10 @@ class MathPrograms:
 
         for demand_node_id in self.graph.demand_nodes:
             demand_node = self.graph.demand_nodes[demand_node_id]
-            model.addConstr( gp.quicksum( y[supply_node_id,demand_node_id] for supply_node_id in demand_node.neighbors) <= average_demand[demand_node_id]*scaling_factor )
+            if demand_node.id == demand_node_id_to_add_1:
+                model.addConstr( gp.quicksum( y[supply_node_id,demand_node_id] for supply_node_id in demand_node.neighbors) <= average_demand[demand_node_id]*scaling_factor + 1 )
+            else:
+                model.addConstr( gp.quicksum( y[supply_node_id,demand_node_id] for supply_node_id in demand_node.neighbors) <= average_demand[demand_node_id]*scaling_factor )
 
         for supply_node_id in self.graph.supply_nodes:
             supply_node = self.graph.supply_nodes[supply_node_id]

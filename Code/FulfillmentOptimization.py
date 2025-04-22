@@ -705,7 +705,7 @@ class MultiPriceBalanceFulfillment:
         return -1
 
 
-class LpReSolvingFulfillment:
+class OffLpReSolvingFulfillment:
     
     def __init__(self, graph: Graph):
         
@@ -717,7 +717,6 @@ class LpReSolvingFulfillment:
                 inventory: Inventory,
                 initial_dual_solution: Dict[int, float],
                 train_sample: List[Sequence],
-                linear_program: str = 'offline',
                 re_solving_epochs: List[int] = None,
                 filter_samples = False,
                 verbose=False,
@@ -782,7 +781,7 @@ class LpReSolvingFulfillment:
         for supply_node_id in demand_node.neighbors:
             if current_inventories[supply_node_id]>0:
                 pseudo_reward = self.graph.edges[supply_node_id, demand_node.id].reward - dual_variables[supply_node_id]
-                if pseudo_reward>best_reward:
+                if pseudo_reward>=best_reward:
                     best_reward = pseudo_reward
                     supply_node_chosen = supply_node_id
         
@@ -790,7 +789,7 @@ class LpReSolvingFulfillment:
             
         
         
-    def compute_dual_variables(self, train_sample: List[Sequence], t, current_inventories, current_demand_node, filter_samples):
+    def compute_dual_variables(self, train_sample: List[Sequence], t, current_inventories, current_demand_node,filter_samples):
         
 
         
@@ -821,8 +820,121 @@ class LpReSolvingFulfillment:
             #otherwise, return the whole sample
             # print(f'returned original sample')
             return train_sample
+    
+class FluLpReSolvingFulfillment:
+    
+    def __init__(self, graph: Graph):
+        
+        self.graph = graph
+        self.programs = MathPrograms(graph)
+        
+    def fulfill(self,
+                sequence: Sequence,
+                inventory: Inventory,
+                initial_dual_solution: Dict[int, float],
+                cumulative_average_demand: Dict[int,Dict[int, float]],
+                re_solving_epochs: List[int] = None,
+                filter_samples = False,
+                verbose=False,
+                ):
+        
+        collected_rewards = 0
+        lost_sales = 0
+        total_fulfillments = 0
+        number_fulfillments = defaultdict(int) # maps edges to number of times the edge was used
+        
+        n_epochs = len(re_solving_epochs)
+        current_epoch_index = 0
+        next_epoch = re_solving_epochs[current_epoch_index]
+        
+        dual_variables = initial_dual_solution
+        
+        current_inventories = inventory.initial_inventory.copy()
+        
+        for t, request in enumerate(sequence.requests):    
+            
+            demand_node = self.graph.demand_nodes[request.demand_node]
+            
+            if t == next_epoch:
+                if verbose:
+                    print(f'Re-solving at {t}')
+                dual_variables = self.compute_dual_variables(t, current_inventories, demand_node, cumulative_average_demand)
+                
+                if current_epoch_index == len(re_solving_epochs)-1:
+                    next_epoch = len(sequence) +1
+                else:
+                    current_epoch_index+=1
+                    next_epoch = re_solving_epochs[current_epoch_index]
+                    
+            
+            supply_node_chosen = self.choose_supply_node(demand_node, current_inventories, dual_variables)
+            # print(supply_node_chosen)
+            if supply_node_chosen == -1:
+                if verbose:
+                    print(f'Demand from {demand_node.id} lost')
+                lost_sales+=1
+            
+            else:
+                if verbose:
+                    print(f'Demand from {demand_node.id} fulfilled from warehouse {supply_node_chosen}')
+                current_inventories[supply_node_chosen] -=1
+                number_fulfillments[ supply_node_chosen, demand_node.id] += 1
+                
+                collected_rewards += self.graph.edges[supply_node_chosen, demand_node.id].reward
+
+                total_fulfillments += 1          
                 
                 
+        
+        return number_fulfillments, collected_rewards, lost_sales
+
+
+    def choose_supply_node(self, demand_node: DemandNode, current_inventories, dual_variables):
+        
+        supply_node_chosen = -1
+        best_reward = 0
+        
+        for supply_node_id in demand_node.neighbors:
+            if current_inventories[supply_node_id]>0:
+                pseudo_reward = self.graph.edges[supply_node_id, demand_node.id].reward - dual_variables[supply_node_id]
+                if pseudo_reward>=best_reward:
+                    best_reward = pseudo_reward
+                    supply_node_chosen = supply_node_id
+        
+        return supply_node_chosen
+            
+        
+        
+    def compute_dual_variables(self, t, current_inventories, current_demand_node, cumulative_demand, demand_at_hand: bool = True ):
+        
+
+        if demand_at_hand:
+            fluid_lp, inventory_constraints = self.programs.fluid_linear_program_fixed_inventory(cumulative_demand[t+1], Inventory(current_inventories, 'aux'), demand_node_id_to_add_1=current_demand_node.id)
+            
+        else:
+            fluid_lp, inventory_constraints = self.programs.fluid_linear_program_fixed_inventory(cumulative_demand[0], Inventory(current_inventories, 'aux'))
+        
+
+        fluid_lp.optimize()
+    
+        duals = {(supply_node_id): inventory_constraints[supply_node_id].Pi  for supply_node_id in self.graph.supply_nodes }
+        
+        return duals
+    
+    def filter_sample(self, train_sample: List[Sequence], t, current_demand_node: DemandNode, size_threshold = 1):
+        filtered_sample = []
+        for sequence in train_sample:
+            if sequence.requests[t].demand_node == current_demand_node.id:
+                filtered_sample.append(sequence)
+        
+        if len(filtered_sample)>= size_threshold:
+            # If we have enough samples, return the filtered version
+            # print(f'returned_filtered: {len(filtered_sample)} out of {len(train_sample)}')
+            return filtered_sample
+        else:
+            #otherwise, return the whole sample
+            # print(f'returned original sample')
+            return train_sample
                 
 
 class DualMirrorDescentFulfillment:

@@ -1,7 +1,7 @@
 import time
 
 from Graph import Graph, RandomGraphGenerator
-from FulfillmentOptimization import Fulfillment, Inventory, PolicyFulfillment, MultiPriceBalanceFulfillment, LpReSolvingFulfillment, BalanceFulfillment
+from FulfillmentOptimization import Fulfillment, Inventory, PolicyFulfillment, MultiPriceBalanceFulfillment, BalanceFulfillment, FluLpReSolvingFulfillment
 from ModelBased import IndependentDynamicProgram, ModelEstimator, MarkovianDynamicProgram
 from Demand import TemporalIndependenceGenerator, RWGenerator, MarkovianGenerator, Sequence, RandomDistributionGenerator
 # from LearningPolicy import DepletionAwarePolicy, train_depletion_policy, extract_reward_matrix, SubscriptableDepletionPolicyWrapper, train_depletion_policy_black_box, train_depletion_nn_policy, NNPolicyWrapper
@@ -47,6 +47,7 @@ class OutputWriter:
                 data_agnostic_policies:List[str],
                 model_based_dynamic_programs: List[str],
                 model_free_parametrized_policies: List[str],
+                lp_resolving_policies: List[str],
                 num_instances: int,
                 train_sample_sizes: List[int],
                 num_samples_per_size : int,
@@ -58,6 +59,7 @@ class OutputWriter:
         self.model_based_dynamic_programs = model_based_dynamic_programs
         self.num_instances = num_instances
         self.model_free_parametrized_policies = model_free_parametrized_policies
+        self.lp_resolving_policies = lp_resolving_policies
         self.train_sample_sizes = train_sample_sizes
         self.results = results
         
@@ -82,7 +84,7 @@ class OutputWriter:
                 for policy in self.data_agnostic_policies:
                     spamwriter.writerow([instance_id, policy, 0, 0, self.results[instance_id][policy].rewards, self.results[instance_id][policy].train_times, self.results[instance_id][policy].test_times])
                 
-                for policy in self.model_based_dynamic_programs + self.model_free_parametrized_policies:
+                for policy in self.model_based_dynamic_programs + self.model_free_parametrized_policies + self.lp_resolving_policies:
                 
                     for num_samples in self.train_sample_sizes:
                         for sample_id in range(self.num_samples_per_size):
@@ -91,6 +93,29 @@ class OutputWriter:
                 
 
 
+
+def compute_cumulative_average_demand(train_sample: List[Sequence], graph: Graph):
+    
+    cumulative_average_demand = {}
+    n_train_samples = len(train_sample)
+    T = len(train_sample[0])
+    
+    for t in range(T+1):
+        cumulative_average_demand[t] = defaultdict(int)
+        
+    
+    for t in range(T-1, -1, -1):
+        
+        current_t_prob = defaultdict(int)
+        
+        for sequence in train_sample:
+            current_t_prob[sequence.requests[t].demand_node] += 1/n_train_samples   
+        
+        for demand_node_id in graph.demand_nodes:
+            cumulative_average_demand[t][demand_node_id] = current_t_prob[demand_node_id] + cumulative_average_demand[t+1][demand_node_id]
+        
+    
+    return cumulative_average_demand
 
   
 class Experiment:
@@ -102,6 +127,7 @@ class Experiment:
         data_agnostic_policies:List[str],
         model_based_dynamic_programs: List[str],
         model_free_parametrized_policies: List[str],
+        lp_resolving_policies: List[str],
         train_sample_sizes: List[int],
         train_samples: Dict[int, List[List[Sequence]]],
         test_samples: List[Sequence],
@@ -116,6 +142,7 @@ class Experiment:
         self.data_agnostic_policies = data_agnostic_policies
         self.model_based_dynamic_programs = model_based_dynamic_programs
         self.model_free_parametrized_policies = model_free_parametrized_policies
+        self.lp_resolving_policies = lp_resolving_policies
         self.train_sample_sizes = train_sample_sizes
         self.train_samples = train_samples
         self.test_samples = test_samples
@@ -176,6 +203,9 @@ class Experiment:
         
         for policy in self.model_based_dynamic_programs:
             instance_results[policy] = self.process_dp(policy)
+        
+        for policy in self.lp_resolving_policies:
+            instance_results[policy] = self.process_lp(policy)
         
         # Model free policies
 
@@ -299,7 +329,7 @@ class Experiment:
                 
                 train_sample = self.train_samples[n_train_samples][sample_id]
                 
-                train_budget = min(3000,self.training_budget_per_parameter * fulfiller.num_parameters)
+                train_budget = min(4000,self.training_budget_per_parameter * fulfiller.num_parameters)
                 
                 start = time.time()
                 best_param = fulfiller.train(self.inventory, train_sample, budget = train_budget)
@@ -412,26 +442,81 @@ class Experiment:
         
         return policy_output
                 
+    
+    def process_lp(self,lp_name):
+        if lp_name == 'fluid_lp_resolving':
+            
+            return self.process_fluid_lp_resolving()
+    
+    def process_fluid_lp_resolving(self):
+        
+        re_solving_epochs = [0,1,2,3,4,5,6,7,8,9,10,11]
+        
+        initial_dual_variables = defaultdict(list)
+        backwards_cumulative_average_demand = defaultdict(list)
+        train_times = defaultdict(list)
+        
+        fulfiller = FluLpReSolvingFulfillment(self.graph)
+        
+        for n_train_samples in self.train_sample_sizes:
+            for sample_id in range(self.n_samples_per_size):
+                
+                train_sample = self.train_samples[n_train_samples][sample_id]
+                
+                start = time.time()
+                
+                
+                backwards_cumulative_average_demand[n_train_samples].append( compute_cumulative_average_demand(train_sample, self.graph) )
+                
+                
+                initial_dual_variables[n_train_samples].append(fulfiller.compute_dual_variables(0,self.inventory.initial_inventory,None,backwards_cumulative_average_demand[n_train_samples][sample_id],demand_at_hand=False))
+                
+                train_times[n_train_samples].append(time.time()-start)
         
         
-
+        
+        rewards = {}
+        for n_train_samples in self.train_sample_sizes:
+            rewards[n_train_samples] = [0 for _ in range(self.n_samples_per_size)]
+        
+        
+        test_times = defaultdict(list)
+        
+        
+        for n_train_samples in self.train_sample_sizes:
+            for i in range(self.n_samples_per_size):
+                start = time.time()
+                for sequence in self.test_samples:
+                    _, reward, _ = fulfiller.fulfill(sequence, self.inventory, initial_dual_variables[n_train_samples][i], backwards_cumulative_average_demand[n_train_samples][i],re_solving_epochs)
+                    rewards[n_train_samples][i] += reward/self.n_test_samples
+                test_times[n_train_samples].append( (time.time()-start)/self.n_test_samples ) 
+                
+        
+        policy_output = {}
+            
+        for n_train_samples in self.train_sample_sizes:
+            policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples,'fluid_lp_resolving')
+        
+        return policy_output
 
 
 def main(demand_model):
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 3
+    num_instances = 5
     
-    train_sample_sizes = [ 5, 10, 50]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 3
+    train_sample_sizes = [ 100, 500]#, 100, 500]#, 500, 1000, 5000]
+    n_samples_per_size = 5
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
     data_agnostic_policies = ['myopic', 'balance', 'offline']
     model_based_dynamic_programs = ['iid_dp', 'indep_dp', 'markov_dp']#, 'time_enhanced_balance', 'supply_enhanced_balance']
     
-    model_free_parametrized_policies = ['neural_opportunity_cost']#,'time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance']
+    model_free_parametrized_policies = []# ['neural_opportunity_cost']#,'time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance']
+    
+    lp_resolving_policies = ['fluid_lp_resolving']
     
     n_test_samples = 5000
     
@@ -548,6 +633,7 @@ def main(demand_model):
                 data_agnostic_policies,
                 model_based_dynamic_programs,
                 model_free_parametrized_policies,
+                lp_resolving_policies,
                 train_sample_sizes,
                 train_samples[instance_id],
                 test_samples[instance_id],
@@ -564,6 +650,7 @@ def main(demand_model):
                 data_agnostic_policies,
                 model_based_dynamic_programs,
                 model_free_parametrized_policies,
+                lp_resolving_policies,
                 train_sample_sizes,
                 train_samples[instance_id],
                 test_samples[instance_id],
@@ -575,8 +662,8 @@ def main(demand_model):
         results[instance_id] = experiment.conduct_experiment()
         
         
-    writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, num_instances, train_sample_sizes,n_samples_per_size, include_optimal, results)
-    writer.write_output(f'{demand_model}_neural_test.csv')
+    writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, lp_resolving_policies, num_instances, train_sample_sizes,n_samples_per_size, include_optimal, results)
+    writer.write_output(f'{demand_model}_fluid_test.csv')
 
     for instance in range(num_instances):
         instance_results = results[instance]
