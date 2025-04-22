@@ -4,6 +4,7 @@ import os
 import hashlib
 from datetime import datetime
 
+import multiprocessing as mp
 
 
 
@@ -23,6 +24,93 @@ import csv
 from copy import deepcopy
 from MathPrograms import MathPrograms
 
+
+def generate_experiment_logging_setup(demand_model: str, base_log_dir: str = "logs"):
+    os.makedirs(base_log_dir, exist_ok=True)
+    now = datetime.now().isoformat()
+    hash_id = hashlib.md5(now.encode()).hexdigest()[:8]
+    experiment_id = f"{demand_model}_{hash_id}"
+    master_log_path = os.path.join(base_log_dir, f"{experiment_id}.log")
+    return experiment_id, master_log_path
+
+
+
+
+def run_single_instance(args):
+    (
+        instance_id,
+        instance,
+        demand_model,
+        train_sample_sizes,
+        train_samples,
+        test_samples,
+        inventory,
+        data_agnostic_policies,
+        model_based_dynamic_programs,
+        model_free_parametrized_policies,
+        lp_resolving_policies,
+        training_budget_per_parameter,
+        optimal_policy,
+        experiment_id
+    ) = args
+    
+    def setup_instance_logger(experiment_id: str, instance_id: int, log_dir: str = "logs"):
+        log_path = os.path.join(log_dir, f"{experiment_id}_instance_{instance_id}.log")
+        logger = logging.getLogger(f"instance_{instance_id}")
+        logger.setLevel(logging.INFO)
+
+        # Avoid duplicate handlers if rerun
+        if not logger.handlers:
+            handler = logging.FileHandler(log_path, mode='w')
+            formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            logger.propagate = False
+
+        return logger
+
+    logger = setup_instance_logger(experiment_id, instance_id)
+    # Remove root handlers and use this logger instead
+    logging.getLogger().handlers.clear()
+    logging.getLogger().addHandler(logger.handlers[0])
+    logging.getLogger().setLevel(logging.INFO)
+    logging.getLogger().propagate = False
+    logger.info(f"Starting instance {instance_id}")
+
+    graph = instance.graph
+
+
+    experiment = Experiment(
+        graph,
+        demand_model,
+        instance_id,
+        data_agnostic_policies,
+        model_based_dynamic_programs,
+        model_free_parametrized_policies,
+        lp_resolving_policies,
+        train_sample_sizes,
+        train_samples,
+        test_samples,
+        inventory,
+        training_budget_per_parameter,
+        optimal_policy,
+    ) if demand_model in ['indep', 'markov'] else Experiment(
+        graph,
+        demand_model,
+        instance_id,
+        data_agnostic_policies,
+        model_based_dynamic_programs,
+        model_free_parametrized_policies,
+        lp_resolving_policies,
+        train_sample_sizes,
+        train_samples,
+        test_samples,
+        inventory,
+        training_budget_per_parameter,
+    )
+
+    result = experiment.conduct_experiment()
+    return (instance_id, result)
 
 def generate_experiment_id(demand_model: str) -> str:
     now = datetime.now().isoformat()
@@ -566,13 +654,25 @@ def main(demand_model):
     
     
     
-    experiment_id = generate_experiment_id(demand_model)
-    setup_logging(experiment_id)
+    experiment_id, master_log_path = generate_experiment_logging_setup(demand_model)
+
+    logging.basicConfig(
+        filename=master_log_path,
+        filemode='w',
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+    )
+
+    
+
+    
+    parallel = True
     
     n_supply_nodes = 3
     n_demand_nodes = 15
     
     num_instances = 2
+    logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
     train_sample_sizes = [ 5, 10]#, 100, 500]#, 500, 1000, 5000]
     n_samples_per_size = 2
@@ -605,6 +705,7 @@ def main(demand_model):
     test_generator_seed = 3
     
     logging.info('experiment metadata')
+    logging.info(f'parllel = {parallel}')
     logging.info(f'graph_generator_seed={graph_generator_seed}')
     logging.info(f'distribution_generator_seed={distribution_generator_seed}')
     logging.info(f'train_generator_seed={train_generator_seed}')
@@ -642,9 +743,17 @@ def main(demand_model):
     optimal_policies = {}
     
     
+    # demand_node_list = list(graph.demand_nodes.keys())
+    
+
+    train_samples = {}
+    test_samples = {}
+    
+    
     for instance_id in range(num_instances):
     
         graph = graph_generator.two_valued_vertex_graph(n_supply_nodes, n_demand_nodes)
+        demand_node_list = [demand_node_id for demand_node_id in graph.demand_nodes]
         myopic_scores = {(edge.supply_node_id, edge.demand_node_id): edge.reward for edge in graph.edges.values()}
         
         graph.construct_priority_list( 'myopic', myopic_scores, allow_rejections=False)
@@ -670,34 +779,14 @@ def main(demand_model):
             # train_generator = RWGenerator(T, demand_node_list, seed = train_generator_seed, step_size = step_size)
             # test_generator = RWGenerator(T, demand_node_list, seed = test_generator_seed, step_size = step_size)
         
+        
+        
         instances[instance_id] = Instance(graph, deepcopy(distribution), demand_model)
         
     
-    
-    
-    
-    
-    
-    
-    demand_node_list = list(graph.demand_nodes.keys())
-    
-
-    train_samples = {}
-    test_samples = {}
-    
-    results = {}
-    
-    
-    logging.info('instance_id,policy_name,sample_size,sample_id,average_test_reward,training_time,average_testing_time')
-    
-    for instance_id in range(num_instances):
         
         
         instance = instances[instance_id]
-        
-        graph = instance.graph
-
-        demand_node_list = [demand_node_id for demand_node_id in graph.demand_nodes]
         
         if demand_model =='markov':
             
@@ -721,43 +810,95 @@ def main(demand_model):
                 
         test_samples[instance_id] = [test_generator.generate_sequence() for _ in range(n_test_samples)]
 
-        if demand_model == 'indep' or demand_model == 'markov':
-            experiment = Experiment(
-                graph,
-                demand_model,
+    
+    
+    
+    
+    
+    
+    results = {}
+    
+    
+    if parallel:
+        
+        args_list = []
+        for instance_id in range(num_instances):
+            instance = instances[instance_id]
+            args = (
                 instance_id,
-                data_agnostic_policies,
-                model_based_dynamic_programs,
-                model_free_parametrized_policies,
-                lp_resolving_policies,
+                instance,
+                demand_model,
                 train_sample_sizes,
                 train_samples[instance_id],
                 test_samples[instance_id],
                 inventory,
-                training_budget_per_parameter,
-                optimal_policies[instance_id]
-            )
-            # results[i] = experiment(graph,train_sample_sizes, train_samples[i], test_samples[i], inventory, optimal_policies[i])
-        else:
-            experiment = Experiment(
-                graph,
-                demand_model,
-                instance_id,
                 data_agnostic_policies,
                 model_based_dynamic_programs,
                 model_free_parametrized_policies,
                 lp_resolving_policies,
-                train_sample_sizes,
-                train_samples[instance_id],
-                test_samples[instance_id],
-                inventory,
                 training_budget_per_parameter,
+                optimal_policies.get(instance_id),  # will be None if not available
+                experiment_id
             )
-            # results[i] = experiment(graph,train_sample_sizes, train_samples[i], test_samples[i], inventory)
+            args_list.append(args)
+        
+        # Run in parallel
+        with mp.Pool(processes=mp.cpu_count()) as pool:
+            results_list = pool.map(run_single_instance, args_list)
 
-        results[instance_id] = experiment.conduct_experiment()
+        # Collect results
+        results = {instance_id: result for instance_id, result in results_list}
         
         
+    else:
+    
+        logging.info('instance_id,policy_name,sample_size,sample_id,average_test_reward,training_time,average_testing_time')
+        
+        for instance_id in range(num_instances):
+            
+            
+            instance = instances[instance_id]
+            
+            graph = instance.graph
+
+            
+            if demand_model == 'indep' or demand_model == 'markov':
+                experiment = Experiment(
+                    graph,
+                    demand_model,
+                    instance_id,
+                    data_agnostic_policies,
+                    model_based_dynamic_programs,
+                    model_free_parametrized_policies,
+                    lp_resolving_policies,
+                    train_sample_sizes,
+                    train_samples[instance_id],
+                    test_samples[instance_id],
+                    inventory,
+                    training_budget_per_parameter,
+                    optimal_policies[instance_id]
+                )
+                # results[i] = experiment(graph,train_sample_sizes, train_samples[i], test_samples[i], inventory, optimal_policies[i])
+            else:
+                experiment = Experiment(
+                    graph,
+                    demand_model,
+                    instance_id,
+                    data_agnostic_policies,
+                    model_based_dynamic_programs,
+                    model_free_parametrized_policies,
+                    lp_resolving_policies,
+                    train_sample_sizes,
+                    train_samples[instance_id],
+                    test_samples[instance_id],
+                    inventory,
+                    training_budget_per_parameter,
+                )
+                # results[i] = experiment(graph,train_sample_sizes, train_samples[i], test_samples[i], inventory)
+
+            results[instance_id] = experiment.conduct_experiment()
+            
+            
     writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, lp_resolving_policies, num_instances, train_sample_sizes,n_samples_per_size, include_optimal, results)
     writer.write_output(f'{experiment_id}.csv')
 
