@@ -316,7 +316,7 @@ class RandomDistributionGenerator:
             initial_dist_bias = np.array(initial_dist_bias)
             
         exp_vector = self.rng.exponential(1,size = num_demand_nodes) + initial_dist_bias
-        initial_distribution = exp_vector/np.sum(exp_vector)
+        initial_distribution = np.ones(num_demand_nodes) /num_demand_nodes
         
         transition_matrix = np.zeros((num_demand_nodes,num_demand_nodes))
         

@@ -478,7 +478,7 @@ class Experiment:
                 
                 train_sample = self.train_samples[n_train_samples][sample_id]
                 
-                train_budget = min(1000,self.training_budget_per_parameter * fulfiller.num_parameters)
+                train_budget = min(self.training_budget_per_parameter * fulfiller.num_parameters, 2000)
                 
                 start = time.time()
                 best_param = fulfiller.train(self.inventory, train_sample, budget = train_budget)
@@ -622,7 +622,7 @@ class Experiment:
                 backwards_cumulative_average_demand[n_train_samples].append( compute_cumulative_average_demand(train_sample, self.graph) )
                 
                 
-                initial_dual_variables[n_train_samples].append(fulfiller.compute_dual_variables(0,self.inventory.initial_inventory,None,backwards_cumulative_average_demand[n_train_samples][sample_id],demand_at_hand=False))
+                initial_dual_variables[n_train_samples].append(fulfiller.compute_dual_variables(0,self.inventory.initial_inventory,backwards_cumulative_average_demand[n_train_samples][sample_id]))
                 
                 train_times[n_train_samples].append(time.time()-start)
         
@@ -670,23 +670,23 @@ def main(demand_model):
     
 
     
-    parallel = False
+    parallel = True
     
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 1
+    num_instances = 8
     logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
-    train_sample_sizes = [ 50]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 1
+    train_sample_sizes = [ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
+    n_samples_per_size = 5
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
     data_agnostic_policies = ['myopic', 'balance', 'offline']
     model_based_dynamic_programs = ['iid_dp', 'indep_dp', 'markov_dp']#, 'time_enhanced_balance', 'supply_enhanced_balance']
     
-    model_free_parametrized_policies = ['neural_opportunity_cost', 'neural_opportunity_cost_with_id']# ['neural_opportunity_cost']#,'time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance']
+    model_free_parametrized_policies = ['time-supply_enhanced_balance', 'neural_opportunity_cost', 'neural_opportunity_cost_with_id']# ['neural_opportunity_cost']#,'time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance']
     
     lp_resolving_policies = ['fluid_lp_resolving']
     
@@ -911,4 +911,4 @@ def main(demand_model):
 if __name__ == '__main__':
 
     # main('markov')
-    main('indep')
+    main('markov')

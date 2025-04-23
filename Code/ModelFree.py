@@ -530,7 +530,7 @@ class NeuralOpportunityCostPolicy:
         return sum(rewards) / num_batches
 
 
-    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1000, max_samples: int = 100, num_batches: int = 1):
+    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1001, max_samples: int = 1000, num_batches: int = 1):
         init_params = np.concatenate([p.detach().cpu().numpy().ravel() for p in self.model.parameters()]).astype(np.float32)
         param = ng.p.Array(init=init_params).set_bounds(lower=-5.0, upper=5.0)
         optimizer = ng.optimizers.registry[optimizer_name](parametrization=param, budget=budget)

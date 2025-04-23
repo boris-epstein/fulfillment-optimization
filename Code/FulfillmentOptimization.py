@@ -858,7 +858,7 @@ class FluLpReSolvingFulfillment:
             if t == next_epoch:
                 if verbose:
                     print(f'Re-solving at {t}')
-                dual_variables = self.compute_dual_variables(t, current_inventories, demand_node, cumulative_average_demand)
+                dual_variables = self.compute_dual_variables(t, current_inventories, cumulative_average_demand)
                 
                 if current_epoch_index == len(re_solving_epochs)-1:
                     next_epoch = len(sequence) +1
@@ -905,16 +905,11 @@ class FluLpReSolvingFulfillment:
             
         
         
-    def compute_dual_variables(self, t, current_inventories, current_demand_node, cumulative_demand, demand_at_hand: bool = True ):
+    def compute_dual_variables(self, t, current_inventories, cumulative_demand):
         
 
-        if demand_at_hand:
-            fluid_lp, inventory_constraints = self.programs.fluid_linear_program_fixed_inventory(cumulative_demand[t+1], Inventory(current_inventories, 'aux'), demand_node_id_to_add_1=current_demand_node.id)
-            
-        else:
-            fluid_lp, inventory_constraints = self.programs.fluid_linear_program_fixed_inventory(cumulative_demand[0], Inventory(current_inventories, 'aux'))
         
-
+        fluid_lp, inventory_constraints = self.programs.fluid_linear_program_fixed_inventory(cumulative_demand[t+1], Inventory(current_inventories, 'aux'))
         fluid_lp.optimize()
     
         duals = {(supply_node_id): inventory_constraints[supply_node_id].Pi  for supply_node_id in self.graph.supply_nodes }
