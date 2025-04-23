@@ -51,6 +51,7 @@ def run_single_instance(args):
         lp_resolving_policies,
         training_budget_per_parameter,
         optimal_policy,
+        training_budget_cap,
         experiment_id
     ) = args
     
@@ -93,6 +94,7 @@ def run_single_instance(args):
         test_samples,
         inventory,
         training_budget_per_parameter,
+        training_budget_cap,
         optimal_policy,
     ) if demand_model in ['indep', 'markov'] else Experiment(
         graph,
@@ -107,6 +109,7 @@ def run_single_instance(args):
         test_samples,
         inventory,
         training_budget_per_parameter,
+        training_budget_cap,
     )
 
     result = experiment.conduct_experiment()
@@ -276,6 +279,7 @@ class Experiment:
         test_samples: List[Sequence],
         inventory: Inventory,
         training_budget_per_parameter: int,
+        training_budget_cap: int,
         optimal_policy = None,
     ):
         
@@ -296,10 +300,13 @@ class Experiment:
         
         self.n_test_samples = len(test_samples)
         self.training_budget_per_parameter = training_budget_per_parameter
+        self.training_budget_cap = training_budget_cap
         self.T = len(test_samples[0])
         
         self.math_progs = MathPrograms(self.graph)
 
+
+        
 
     def conduct_experiment(self) -> Dict[any, PolicyOutput]:
         
@@ -478,7 +485,7 @@ class Experiment:
                 
                 train_sample = self.train_samples[n_train_samples][sample_id]
                 
-                train_budget = min(self.training_budget_per_parameter * fulfiller.num_parameters, 2000)
+                train_budget = min(self.training_budget_per_parameter * fulfiller.num_parameters, self.training_budget_cap)
                 
                 start = time.time()
                 best_param = fulfiller.train(self.inventory, train_sample, budget = train_budget)
@@ -679,7 +686,7 @@ def main(demand_model):
     logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
     train_sample_sizes = [ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 5
+    n_samples_per_size = 3
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
@@ -693,6 +700,7 @@ def main(demand_model):
     n_test_samples = 5000
     
     training_budget_per_parameter = 100
+    training_budget_cap = 2000
     
     T = 12
     
@@ -726,6 +734,7 @@ def main(demand_model):
     logging.info(f'train_sample_sizes = {train_sample_sizes}')
     logging.info(f'n_test_samples = {n_test_samples}')
     logging.info(f'training_budget_per_parameter = {training_budget_per_parameter}')
+    logging.info(f'training_budget_cap = {training_budget_cap}')
     
     logging.info(f'data_agnostic_policies = {data_agnostic_policies}')
     logging.info(f'model_based_dynamic_programs = {model_based_dynamic_programs}')
@@ -842,6 +851,7 @@ def main(demand_model):
                 lp_resolving_policies,
                 training_budget_per_parameter,
                 optimal_policies.get(instance_id),  # will be None if not available
+                training_budget_cap,
                 experiment_id
             )
             args_list.append(args)
@@ -880,6 +890,7 @@ def main(demand_model):
                     test_samples[instance_id],
                     inventory,
                     training_budget_per_parameter,
+                    training_budget_cap,
                     optimal_policies[instance_id]
                 )
                 # results[i] = experiment(graph,train_sample_sizes, train_samples[i], test_samples[i], inventory, optimal_policies[i])
@@ -897,6 +908,7 @@ def main(demand_model):
                     test_samples[instance_id],
                     inventory,
                     training_budget_per_parameter,
+                    training_budget_cap,
                 )
                 # results[i] = experiment(graph,train_sample_sizes, train_samples[i], test_samples[i], inventory)
 
@@ -911,4 +923,4 @@ def main(demand_model):
 if __name__ == '__main__':
 
     # main('markov')
-    main('markov')
+    main('indep')
