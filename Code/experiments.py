@@ -26,12 +26,23 @@ from MathPrograms import MathPrograms
 
 
 def generate_experiment_logging_setup(demand_model: str, base_log_dir: str = "logs"):
-    os.makedirs(base_log_dir, exist_ok=True)
+    from datetime import datetime
+    import hashlib
+    import os
+
+    # Generate unique experiment ID
     now = datetime.now().isoformat()
     hash_id = hashlib.md5(now.encode()).hexdigest()[:8]
     experiment_id = f"{demand_model}_{hash_id}"
-    master_log_path = os.path.join(base_log_dir, f"{experiment_id}.log")
-    return experiment_id, master_log_path
+
+    # Create subdirectory for the experiment
+    experiment_dir = os.path.join(base_log_dir, experiment_id)
+    os.makedirs(experiment_dir, exist_ok=True)
+
+    # Create master log file path inside the subdirectory
+    master_log_path = os.path.join(experiment_dir, "main.log")
+
+    return experiment_id, experiment_dir, master_log_path
 
 
 
@@ -52,11 +63,12 @@ def run_single_instance(args):
         training_budget_per_parameter,
         optimal_policy,
         training_budget_cap,
-        experiment_id
+        experiment_dir,
     ) = args
     
-    def setup_instance_logger(experiment_id: str, instance_id: int, log_dir: str = "logs"):
-        log_path = os.path.join(log_dir, f"{experiment_id}_instance_{instance_id}.log")
+    def setup_instance_logger(experiment_dir: str, instance_id: int):
+
+        log_path = os.path.join(experiment_dir, f"instance_{instance_id}.log")
         logger = logging.getLogger(f"instance_{instance_id}")
         logger.setLevel(logging.INFO)
 
@@ -70,13 +82,15 @@ def run_single_instance(args):
 
         return logger
 
-    logger = setup_instance_logger(experiment_id, instance_id)
+    logger = setup_instance_logger(experiment_dir, instance_id)
     # Remove root handlers and use this logger instead
     logging.getLogger().handlers.clear()
     logging.getLogger().addHandler(logger.handlers[0])
     logging.getLogger().setLevel(logging.INFO)
     logging.getLogger().propagate = False
     logger.info(f"Starting instance {instance_id}")
+    
+    logging.info('instance_id,policy_name,sample_size,sample_id,average_test_reward,training_time,average_testing_time')
 
     graph = instance.graph
 
@@ -170,21 +184,10 @@ class PolicyOutput:
 
 
 
+def log_output_line(instance_id, policy_name, sample_size, sample_id, average_test_reward, training_time, average_testing_time):
+    
+    logging.info(f'{instance_id},{policy_name},{sample_size},{sample_id},{average_test_reward},{training_time},{average_testing_time}')
 
-def log_data_agnostic_result(instance_id, policy_output: PolicyOutput):
-    logging.info(f'{instance_id},{policy_output.policy_name},{policy_output.train_set_size},0,{policy_output.rewards},{policy_output.train_times},{policy_output.test_times}')
-    
-    
-
-def log_data_driven_result(instance_id, policy_outputs: Dict[int,PolicyOutput], train_sample_sizes):
-    
-    for n_train_samples in train_sample_sizes:
-        policy_output = policy_outputs[n_train_samples]
-        for sample_id in range(len(policy_output.rewards)):
-            
-            logging.info(f'{instance_id},{policy_output.policy_name},{policy_output.train_set_size},{sample_id},{policy_output.rewards[sample_id]},{policy_output.train_times[sample_id]},{policy_output.test_times[sample_id]}')
-        
-            # policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples, policy)
 
 
 class OutputWriter:
@@ -318,7 +321,13 @@ class Experiment:
         
         T = len(self.test_samples[0])
         n_samples_per_size = len(self.train_samples[self.train_sample_sizes[0]])
+
         
+        ### OFFLINE POLICY
+        
+        if 'offline' in self.data_agnostic_policies:
+            
+            instance_results['offline'] = self.process_offline()
         
         ### OPTIMAL POLICY
         
@@ -326,12 +335,6 @@ class Experiment:
         if self.optimal_policy is not None:
             instance_results['optimal'] = self.process_optimal()
         
-        
-        ### OFFLINE POLICY
-        
-        if 'offline' in self.data_agnostic_policies:
-            
-            instance_results['offline'] = self.process_offline()
         
         
         ### DATA AGNOSTIC ALGORITHMS
@@ -382,7 +385,7 @@ class Experiment:
     
         
         policy_output = PolicyOutput(offline_lp.ObjVal/self.n_test_samples, 0, off_time, 0, 'offline')
-        
+        log_output_line(self.instance_id, 'offline', 0, 0, policy_output.rewards,policy_output.train_times,policy_output.test_times)
         return policy_output
 
     
@@ -399,6 +402,8 @@ class Experiment:
         test_time = (time.time() - start)/self.n_test_samples
         
         policy_output = PolicyOutput(rewards, 0, test_time, 0, 'optimal')
+        
+        log_output_line(self.instance_id, 'optimal', 0, 0, policy_output.rewards,0,policy_output.test_times)
         
         return policy_output
         
@@ -424,9 +429,12 @@ class Experiment:
             rewards += reward/self.n_test_samples
             
         test_time = (time.time()-start)/self.n_test_samples
-                
+        
+        
         
         policy_output = PolicyOutput(rewards, train_time, test_time, 0, 'myopic')
+        
+        log_output_line(self.instance_id, 'myopic', 0, 0, policy_output.rewards, policy_output.train_times ,policy_output.test_times)
         
         return policy_output
     
@@ -448,7 +456,7 @@ class Experiment:
         
         policy_output = PolicyOutput(rewards, train_time, test_time, 0, 'balance')
         
-        log_data_agnostic_result(self.instance_id, policy_output)
+        log_output_line(self.instance_id, 'balance', 0, 0, policy_output.rewards, policy_output.train_times ,policy_output.test_times)
         
         return policy_output
     
@@ -513,14 +521,14 @@ class Experiment:
                     rewards[n_train_samples][i] += reward/self.n_test_samples
                 test_times[n_train_samples].append( (time.time()-start)/self.n_test_samples )
                 
-                
+                log_output_line(self.instance_id, policy, n_train_samples, i, rewards[n_train_samples][i], train_times[n_train_samples][i], test_times[n_train_samples][i])
         
         policy_output = {}
             
         for n_train_samples in self.train_sample_sizes:
             policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples, policy)
         
-        log_data_driven_result(self.instance_id, policy_output, self.train_sample_sizes)
+        
         
         return policy_output
     
@@ -591,14 +599,15 @@ class Experiment:
                     _, reward, _ = dp_fulfiller.fulfill(sequence, self.inventory, estimated_policy[n_train_samples][i].optimal_action)
                     rewards[n_train_samples][i] += reward/self.n_test_samples
                 test_times[n_train_samples].append( (time.time()-start)/self.n_test_samples ) 
-                
+            
+                log_output_line(self.instance_id, dp_name, n_train_samples, i, rewards[n_train_samples][i], train_times[n_train_samples][i], test_times[n_train_samples][i])        
         
         policy_output = {}
             
         for n_train_samples in self.train_sample_sizes:
             policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples,dp_name)
         
-        log_data_driven_result(self.instance_id, policy_output, self.train_sample_sizes)
+        
         
         return policy_output
                 
@@ -651,13 +660,15 @@ class Experiment:
                     rewards[n_train_samples][i] += reward/self.n_test_samples
                 test_times[n_train_samples].append( (time.time()-start)/self.n_test_samples ) 
                 
+                log_output_line(self.instance_id, 'fluid_lp_resolving', n_train_samples, i, rewards[n_train_samples][i], train_times[n_train_samples][i], test_times[n_train_samples][i])
+                
         
         policy_output = {}
             
         for n_train_samples in self.train_sample_sizes:
             policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples,'fluid_lp_resolving')
         
-        log_data_driven_result(self.instance_id, policy_output, self.train_sample_sizes)
+        
         return policy_output
 
 
@@ -665,7 +676,7 @@ def main(demand_model):
     
     
     
-    experiment_id, master_log_path = generate_experiment_logging_setup(demand_model)
+    experiment_id, experiment_dir, master_log_path = generate_experiment_logging_setup(demand_model)
 
     logging.basicConfig(
         filename=master_log_path,
@@ -674,7 +685,7 @@ def main(demand_model):
         format="%(asctime)s | %(levelname)s | %(message)s",
     )
 
-    
+    logging.info(f"Experiment {experiment_id} initialized in folder: {experiment_dir}")
 
     
     parallel = True
@@ -682,10 +693,10 @@ def main(demand_model):
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 8
+    num_instances = 2
     logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
-    train_sample_sizes = [ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
+    train_sample_sizes = [1] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
     n_samples_per_size = 3
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
@@ -697,10 +708,10 @@ def main(demand_model):
     
     lp_resolving_policies = ['fluid_lp_resolving']
     
-    n_test_samples = 5000
+    n_test_samples = 500
     
     training_budget_per_parameter = 100
-    training_budget_cap = 2000
+    training_budget_cap = 200
     
     T = 12
     
@@ -852,7 +863,7 @@ def main(demand_model):
                 training_budget_per_parameter,
                 optimal_policies.get(instance_id),  # will be None if not available
                 training_budget_cap,
-                experiment_id
+                experiment_dir
             )
             args_list.append(args)
         
