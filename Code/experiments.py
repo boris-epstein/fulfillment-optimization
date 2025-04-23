@@ -13,7 +13,7 @@ from FulfillmentOptimization import Fulfillment, Inventory, PolicyFulfillment, M
 from ModelBased import IndependentDynamicProgram, ModelEstimator, MarkovianDynamicProgram
 from Demand import TemporalIndependenceGenerator, RWGenerator, MarkovianGenerator, Sequence, RandomDistributionGenerator, HiddenMarkovGenerator
 # from LearningPolicy import DepletionAwarePolicy, train_depletion_policy, extract_reward_matrix, SubscriptableDepletionPolicyWrapper, train_depletion_policy_black_box, train_depletion_nn_policy, NNPolicyWrapper
-from ModelFree import ThresholdsFulfillment, TimeSupplyEnhancedMPB, DemandTrackingMPB, AdaptiveThresholdsFulfillment, TimeEnhancedMPB, SupplyEnhancedMPB, NeuralOpportunityCostPolicy, NeuralOpportunityCostWithIDPolicy
+from ModelFree import ThresholdsFulfillment, TimeSupplyEnhancedMPB, TimeEnhancedMPB, SupplyEnhancedMPB, NeuralOpportunityCostPolicy, NeuralOpportunityCostWithIDPolicy
 from utils import correl_graph
 # from NNPolicy import OnlineMatchingPolicy, evaluate_policy_with_params,create_and_train_policy_ng
 from typing import Any, Dict, List
@@ -701,22 +701,22 @@ def main(demand_model):
         
     logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
-    train_sample_sizes = [1, 10, 50, 100] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 2
+    train_sample_sizes = [5, 10]#, 50, 100, 500] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
+    n_samples_per_size = 3
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
     data_agnostic_policies = ['myopic', 'balance', 'offline']
     model_based_dynamic_programs = ['iid_dp', 'indep_dp', 'markov_dp']#, 'time_enhanced_balance', 'supply_enhanced_balance']
     
-    model_free_parametrized_policies = ['time-supply_enhanced_balance', 'neural_opportunity_cost', 'neural_opportunity_cost_with_id']# ['neural_opportunity_cost']#,'time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance']
+    model_free_parametrized_policies = ['time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance', 'neural_opportunity_cost', 'neural_opportunity_cost_with_id']# ['neural_opportunity_cost']#,'time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance']
     
     lp_resolving_policies = ['fluid_lp_resolving']
     
     n_test_samples = 5000
     
     training_budget_per_parameter = 100
-    training_budget_cap = 2000
+    training_budget_cap = 3000
     
     T = 12
     
