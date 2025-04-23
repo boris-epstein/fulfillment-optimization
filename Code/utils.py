@@ -12,10 +12,12 @@ def correl_graph(low_reward, high_reward_probability, seed = 0):
     
     graph.add_demand_node(0)
     graph.add_demand_node(1)
+    graph.add_demand_node(2)
     
     graph.add_edge(0,0,low_reward)
     graph.add_edge(0,1,1)
     
+    graph.populate_neighbors()
     
     states = list(range(13))
     
@@ -48,7 +50,7 @@ def correl_graph(low_reward, high_reward_probability, seed = 0):
     
     transition_matrix[12,12] = 1
         
-    print(transition_matrix)
+    # print(transition_matrix)
     distribution = HiddenMarkovGenerator(12, [0,1,2], states, state_distributions, initial_distribution, transition_matrix, seed=  seed)    
     
     return graph, distribution

@@ -11,10 +11,10 @@ import multiprocessing as mp
 from Graph import Graph, RandomGraphGenerator
 from FulfillmentOptimization import Fulfillment, Inventory, PolicyFulfillment, MultiPriceBalanceFulfillment, BalanceFulfillment, FluLpReSolvingFulfillment
 from ModelBased import IndependentDynamicProgram, ModelEstimator, MarkovianDynamicProgram
-from Demand import TemporalIndependenceGenerator, RWGenerator, MarkovianGenerator, Sequence, RandomDistributionGenerator
+from Demand import TemporalIndependenceGenerator, RWGenerator, MarkovianGenerator, Sequence, RandomDistributionGenerator, HiddenMarkovGenerator
 # from LearningPolicy import DepletionAwarePolicy, train_depletion_policy, extract_reward_matrix, SubscriptableDepletionPolicyWrapper, train_depletion_policy_black_box, train_depletion_nn_policy, NNPolicyWrapper
 from ModelFree import ThresholdsFulfillment, TimeSupplyEnhancedMPB, DemandTrackingMPB, AdaptiveThresholdsFulfillment, TimeEnhancedMPB, SupplyEnhancedMPB, NeuralOpportunityCostPolicy, NeuralOpportunityCostWithIDPolicy
-
+from utils import correl_graph
 # from NNPolicy import OnlineMatchingPolicy, evaluate_policy_with_params,create_and_train_policy_ng
 from typing import Any, Dict, List
 
@@ -688,16 +688,21 @@ def main(demand_model):
     logging.info(f"Experiment {experiment_id} initialized in folder: {experiment_dir}")
 
     
-    parallel = True
+    parallel = False
     
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 2
+    num_instances = 1
+    
+    if demand_model =='correl':
+        num_instances = 1
+        
+        
     logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
-    train_sample_sizes = [1] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 3
+    train_sample_sizes = [1, 10, 50, 100] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
+    n_samples_per_size = 2
     
     inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
     
@@ -708,10 +713,10 @@ def main(demand_model):
     
     lp_resolving_policies = ['fluid_lp_resolving']
     
-    n_test_samples = 500
+    n_test_samples = 5000
     
     training_budget_per_parameter = 100
-    training_budget_cap = 200
+    training_budget_cap = 2000
     
     T = 12
     
@@ -775,57 +780,54 @@ def main(demand_model):
     
     
     for instance_id in range(num_instances):
-    
-        graph = graph_generator.two_valued_vertex_graph(n_supply_nodes, n_demand_nodes)
-        demand_node_list = [demand_node_id for demand_node_id in graph.demand_nodes]
-        myopic_scores = {(edge.supply_node_id, edge.demand_node_id): edge.reward for edge in graph.edges.values()}
         
-        graph.construct_priority_list( 'myopic', myopic_scores, allow_rejections=False)
-        
-        if demand_model == 'indep':
-            p = dist_generator.generate_indep(n_demand_nodes, T)
-            distribution = p
-            indep_dp = IndependentDynamicProgram(graph)
-            optimal_policy = indep_dp.compute_optimal_policy(inventory, T, p)
-            optimal_policies[instance_id] = optimal_policy
-        
-        elif demand_model == 'markov':
-            initial_distribution, transition_matrix = dist_generator.generate_markov(n_demand_nodes, 4)
-            distribution = (initial_distribution, transition_matrix)
-            markov_dp = MarkovianDynamicProgram(graph)
-            optimal_policy = markov_dp.compute_optimal_policy(inventory, T, transition_matrix)
-            optimal_policies[instance_id] = optimal_policy
-        
-        
-        elif demand_model =='rw':
-            step_size = 3
-            distribution = step_size
-            # train_generator = RWGenerator(T, demand_node_list, seed = train_generator_seed, step_size = step_size)
-            # test_generator = RWGenerator(T, demand_node_list, seed = test_generator_seed, step_size = step_size)
-        
-        
+        if demand_model == 'correl':
+            inventory = Inventory({0:4}, name = 'test')
+            graph, train_generator = correl_graph(0.5,0.2, seed = train_generator_seed)
+            graph, test_generator = correl_graph(0.5,0.2, seed = test_generator_seed)
+            distribution = None
+            
+            
+            
+        else:
+            graph = graph_generator.two_valued_vertex_graph(n_supply_nodes, n_demand_nodes)
+            demand_node_list = [demand_node_id for demand_node_id in graph.demand_nodes]
+            myopic_scores = {(edge.supply_node_id, edge.demand_node_id): edge.reward for edge in graph.edges.values()}
+            
+            graph.construct_priority_list( 'myopic', myopic_scores, allow_rejections=False)
+            
+            if demand_model == 'indep':
+                p = dist_generator.generate_indep(n_demand_nodes, T)
+                distribution = p
+                indep_dp = IndependentDynamicProgram(graph)
+                optimal_policy = indep_dp.compute_optimal_policy(inventory, T, p)
+                optimal_policies[instance_id] = optimal_policy
+                
+                train_generator = TemporalIndependenceGenerator(demand_node_list, p, seed = train_generator_seed)
+                test_generator = TemporalIndependenceGenerator(demand_node_list, p, seed = test_generator_seed)
+            
+            elif demand_model == 'markov':
+                initial_distribution, transition_matrix = dist_generator.generate_markov(n_demand_nodes, 4)
+                distribution = (initial_distribution, transition_matrix)
+                markov_dp = MarkovianDynamicProgram(graph)
+                optimal_policy = markov_dp.compute_optimal_policy(inventory, T, transition_matrix)
+                optimal_policies[instance_id] = optimal_policy
+                
+                train_generator = MarkovianGenerator(T, demand_node_list,transition_matrix,initial_distribution, seed = train_generator_seed)
+                test_generator = MarkovianGenerator(T, demand_node_list,transition_matrix,initial_distribution, seed = test_generator_seed)
+            
+            
+            elif demand_model =='rw':
+                step_size = 3
+                distribution = step_size
+                # train_generator = RWGenerator(T, demand_node_list, seed = train_generator_seed, step_size = step_size)
+                # test_generator = RWGenerator(T, demand_node_list, seed = test_generator_seed, step_size = step_size)
+                train_generator = RWGenerator(T, demand_node_list, seed = train_generator_seed, step_size= step_size)
+                test_generator = RWGenerator(T, demand_node_list, seed = test_generator_seed, step_size= step_size)
+            
+            
         
         instances[instance_id] = Instance(graph, deepcopy(distribution), demand_model)
-        
-    
-        
-        
-        instance = instances[instance_id]
-        
-        if demand_model =='markov':
-            
-            initial_distribution, transition_matrix = instance.distribution
-            train_generator = MarkovianGenerator(T, demand_node_list,transition_matrix,initial_distribution, seed = train_generator_seed)
-            test_generator = MarkovianGenerator(T, demand_node_list,transition_matrix,initial_distribution, seed = test_generator_seed)
-        
-        if demand_model == 'indep':
-            p = instance.distribution
-            train_generator = TemporalIndependenceGenerator(demand_node_list, p, seed = train_generator_seed)
-            test_generator = TemporalIndependenceGenerator(demand_node_list, p, seed = test_generator_seed)
-            
-        if demand_model =='rw':
-            train_generator = RWGenerator(T, demand_node_list, seed = train_generator_seed, step_size= step_size)
-            test_generator = RWGenerator(T, demand_node_list, seed = test_generator_seed, step_size= step_size)
         
         train_samples[instance_id] = defaultdict(list)
         for n_train_samples in train_sample_sizes:
@@ -833,8 +835,10 @@ def main(demand_model):
                 train_samples[instance_id][n_train_samples].append( [train_generator.generate_sequence() for _ in range(n_train_samples)])
                 
         test_samples[instance_id] = [test_generator.generate_sequence() for _ in range(n_test_samples)]
-
-    
+        
+        
+        instance = instances[instance_id]
+        
     
     
     
@@ -934,4 +938,4 @@ def main(demand_model):
 if __name__ == '__main__':
 
     # main('markov')
-    main('indep')
+    main('correl')
