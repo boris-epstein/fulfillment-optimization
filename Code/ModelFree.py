@@ -84,7 +84,7 @@ class TimeSupplyEnhancedMPB(MultiPriceBalanceFulfillment):
         self.num_parameters = len(graph.supply_nodes) + 1
         
 
-    def fulfill(self, sequence: Sequence, inventory: Inventory, theta_and_gamma: list[float]) -> float:
+    def fulfill(self, sequence: Sequence, inventory: Inventory, theta_and_gamma: List[float]) -> float:
         
         m = len(self.graph.supply_nodes)
         theta_list = theta_and_gamma[:m]
@@ -117,7 +117,7 @@ class TimeSupplyEnhancedMPB(MultiPriceBalanceFulfillment):
 
         return total_reward
 
-    def _evaluate(self, theta_and_gamma: list[float], inventory: Inventory, sequences: List[Sequence]) -> float:
+    def _evaluate(self, theta_and_gamma: List[float], inventory: Inventory, sequences: List[Sequence]) -> float:
         # m = len(self.graph.supply_nodes)
         # theta_list = theta_and_gamma[:m]
         # gamma = theta_and_gamma[m]
@@ -157,7 +157,7 @@ class SupplyEnhancedMPB(MultiPriceBalanceFulfillment):
         self.num_parameters = len(graph.supply_nodes)
         
 
-    def fulfill(self, sequence: Sequence, inventory: Inventory, theta_list: list[float]) -> float:
+    def fulfill(self, sequence: Sequence, inventory: Inventory, theta_list: List[float]) -> float:
         
         m = len(self.graph.supply_nodes)
         
@@ -190,7 +190,7 @@ class SupplyEnhancedMPB(MultiPriceBalanceFulfillment):
 
         return total_reward
 
-    def _evaluate(self, theta_list: list[float], inventory: Inventory, sequences: List[Sequence]) -> float:
+    def _evaluate(self, theta_list: List[float], inventory: Inventory, sequences: List[Sequence]) -> float:
         # m = len(self.graph.supply_nodes)
         # theta_list = theta_and_gamma[:m]
         # gamma = theta_and_gamma[m]

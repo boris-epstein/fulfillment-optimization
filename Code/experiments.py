@@ -693,7 +693,7 @@ def main(demand_model):
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 8
+    num_instances = 20
     
     if demand_model =='correl':
         num_instances = 1
@@ -704,7 +704,8 @@ def main(demand_model):
     train_sample_sizes = [5, 10, 50, 100, 500] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
     n_samples_per_size = 5
     
-    inventory = Inventory({0:2, 1:2, 2:2}, name = 'test')
+    init_inventory = 6
+    inventory = Inventory({0:init_inventory, 1:init_inventory, 2:init_inventory}, name = 'test')
     
     data_agnostic_policies = ['myopic', 'balance', 'offline']
     model_based_dynamic_programs = ['iid_dp', 'indep_dp', 'markov_dp']#, 'time_enhanced_balance', 'supply_enhanced_balance']
@@ -718,7 +719,7 @@ def main(demand_model):
     training_budget_per_parameter = 100
     training_budget_cap = 2500
     
-    T = 12
+    T = 18
     
     # vertex_values = {}
     # vertex_values[0] = [0.1, 0.9]
@@ -756,6 +757,8 @@ def main(demand_model):
     logging.info(f'model_based_dynamic_programs = {model_based_dynamic_programs}')
     logging.info(f'model_free_parametrized_policies = {model_free_parametrized_policies}')
     logging.info(f'lp_resolving_policies = {lp_resolving_policies}')
+    
+    logging.info(f'initial_inventory = {init_inventory}')
     
     
     
@@ -872,7 +875,7 @@ def main(demand_model):
             args_list.append(args)
         
         # Run in parallel
-        with mp.Pool(processes=mp.cpu_count()) as pool:
+        with mp.Pool(processes= min(mp.cpu_count(), num_instances)) as pool:
             results_list = pool.map(run_single_instance, args_list)
 
         # Collect results

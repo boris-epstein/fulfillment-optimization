@@ -3,6 +3,8 @@ from Demand import Sequence
 from Graph import Graph
 from typing import Dict, List
 
+gp.setParam('LogToConsole', 0)
+gp.setParam('OutputFlag', 0)
 
 class MathPrograms:
     
