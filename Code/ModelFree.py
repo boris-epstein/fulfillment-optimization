@@ -69,7 +69,6 @@ class ThresholdsFulfillment:
         max_inventory = max(init_theta)
 
         param = ng.p.Array(init=init_theta, lower=0.0, upper=max_inventory)
-        param.random_state.seed(seed)
         optimizer = ng.optimizers.registry[optimizer_name](parametrization=param, budget=budget)
         
         # Use a bound method in the lambda
@@ -136,7 +135,7 @@ class TimeSupplyEnhancedMPB(MultiPriceBalanceFulfillment):
 
         param = ng.p.Array(init=init)
         param.set_bounds(lower=[-3.0] * m + [-1.0], upper=[3.0] * m + [8.0])
-        param.random_state.seed(seed)
+
 
 
         optimizer_cls = ng.optimizers.registry[optimizer_name]
@@ -209,7 +208,7 @@ class SupplyEnhancedMPB(MultiPriceBalanceFulfillment):
 
         param = ng.p.Array(init=init)
         param.set_bounds(lower=[-3.0] * m , upper=[3.0] * m )
-        param.random_state.seed(seed)
+
 
 
         optimizer_cls = ng.optimizers.registry[optimizer_name]
@@ -275,7 +274,6 @@ class TimeEnhancedMPB(MultiPriceBalanceFulfillment):
 
         param = ng.p.Array(init=init)
         param.set_bounds(lower = [-1.0], upper= [10.0])
-        param.random_state.seed(seed)
 
 
         optimizer_cls = ng.optimizers.registry[optimizer_name]
@@ -387,7 +385,6 @@ class NeuralOpportunityCostPolicy:
     def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1001, seed: int = 42):
         init_params = np.concatenate([p.detach().cpu().numpy().ravel() for p in self.model.parameters()]).astype(np.float32)
         param = ng.p.Array(init=init_params).set_bounds(lower=-5.0, upper=5.0)
-        param.random_state.seed(seed)
         optimizer = ng.optimizers.registry[optimizer_name](parametrization=param, budget=budget)
 
         best_candidate = optimizer.minimize(
@@ -490,7 +487,7 @@ class NeuralOpportunityCostWithIDPolicy:
     def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1000, seed: int = 42):
         init_params = np.concatenate([p.detach().cpu().numpy().ravel() for p in self.model.parameters()]).astype(np.float32)
         param = ng.p.Array(init=init_params).set_bounds(lower=-5.0, upper=5.0)
-        param.random_state.seed(seed)
+
         optimizer = ng.optimizers.registry[optimizer_name](parametrization=param, budget=budget)
 
         best_candidate = optimizer.minimize(
