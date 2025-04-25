@@ -693,12 +693,12 @@ def main(demand_model):
     logging.info(f"Experiment {experiment_id} initialized in folder: {experiment_dir}")
 
     
-    parallel = True
+    parallel = False
     
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 10
+    num_instances = 1
     
     if demand_model =='correl':
         num_instances = 1
@@ -707,9 +707,10 @@ def main(demand_model):
     logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
     train_sample_sizes = [5**(i) for i in range(4)] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 6
+    train_sample_sizes = [20]
+    n_samples_per_size = 3
     
-    init_inventory = 6
+    init_inventory = 2
     T = 18
     
     inventory = Inventory({0:init_inventory, 1:init_inventory, 2:init_inventory}, name = 'test')
@@ -792,9 +793,9 @@ def main(demand_model):
     for instance_id in range(num_instances):
         
         if demand_model == 'correl':
-            inventory = Inventory({0:4}, name = 'test')
-            graph, train_generator = correl_graph(0.5,0.2, seed = train_generator_seed)
-            graph, test_generator = correl_graph(0.5,0.2, seed = test_generator_seed)
+            inventory = Inventory({0:init_inventory}, name = 'test')
+            graph, train_generator = correl_graph(0.5,0.2, T, seed = train_generator_seed)
+            graph, test_generator = correl_graph(0.5,0.2, T, seed = test_generator_seed)
             distribution = None
             
             
@@ -948,4 +949,4 @@ def main(demand_model):
 if __name__ == '__main__':
 
     # main('markov')
-    main('indep')
+    main('correl')
