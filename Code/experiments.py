@@ -701,10 +701,10 @@ def main(demand_model):
         
     logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
-    train_sample_sizes = [5, 10, 50, 100, 500] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
+    train_sample_sizes = [5**(i) for i in range(4)] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
     n_samples_per_size = 5
     
-    init_inventory = 6
+    init_inventory = 2
     inventory = Inventory({0:init_inventory, 1:init_inventory, 2:init_inventory}, name = 'test')
     
     data_agnostic_policies = ['myopic', 'balance', 'offline']
@@ -719,7 +719,7 @@ def main(demand_model):
     training_budget_per_parameter = 100
     training_budget_cap = 2500
     
-    T = 18
+    T = 6
     
     # vertex_values = {}
     # vertex_values[0] = [0.1, 0.9]
@@ -936,9 +936,9 @@ def main(demand_model):
     writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, lp_resolving_policies, num_instances, train_sample_sizes,n_samples_per_size, include_optimal, results)
     writer.write_output(f'{experiment_id}.csv')
 
-            
+    
 
 if __name__ == '__main__':
 
     # main('markov')
-    main('indep')
+    main('markov')

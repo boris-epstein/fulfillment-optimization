@@ -340,7 +340,7 @@ class NeuralOpportunityCostPolicy:
                     future_value = sum(
                         self.graph.edges[(i, jp)].reward * djt[jp]
                         for jp in self.demand_ids
-                        if (i, jp) in self.graph.edges and self.graph.edges[(i, jp)].reward > r_ij
+                        if (i, jp) in self.graph.edges
                     )
 
                     x = [used_frac, time_fraction, future_value]
@@ -452,7 +452,7 @@ class NeuralOpportunityCostWithIDPolicy:
                     future_value = sum(
                         self.graph.edges[(i, jp)].reward * djt[jp]
                         for jp in self.demand_ids
-                        if (i, jp) in self.graph.edges and self.graph.edges[(i, jp)].reward > r_ij
+                        if (i, jp) in self.graph.edges
                     )
 
                     # One-hot encode the supply node i
