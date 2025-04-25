@@ -619,8 +619,13 @@ class Experiment:
     
     def process_fluid_lp_resolving(self):
         
-        re_solving_epochs = [2,5,9]
-        
+        if self.T == 6:
+            re_solving_epochs = [1,2,3,4,5]
+        if self.T ==12:
+            re_solving_epochs = [2,4,6,8,10]
+        if self.T == 18:
+            re_solving_epochs = [3,6,9,12,15]
+            
         initial_dual_variables = defaultdict(list)
         backwards_cumulative_average_demand = defaultdict(list)
         train_times = defaultdict(list)
@@ -693,7 +698,7 @@ def main(demand_model):
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 20
+    num_instances = 2
     
     if demand_model =='correl':
         num_instances = 1
@@ -702,7 +707,8 @@ def main(demand_model):
     logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
     train_sample_sizes = [5**(i) for i in range(4)] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
-    n_samples_per_size = 5
+    train_sample_sizes = [10]
+    n_samples_per_size = 1
     
     init_inventory = 2
     inventory = Inventory({0:init_inventory, 1:init_inventory, 2:init_inventory}, name = 'test')
@@ -935,7 +941,7 @@ def main(demand_model):
             
     writer = OutputWriter(data_agnostic_policies, model_based_dynamic_programs, model_free_parametrized_policies, lp_resolving_policies, num_instances, train_sample_sizes,n_samples_per_size, include_optimal, results)
     writer.write_output(f'{experiment_id}.csv')
-
+    logging.info('Experiment finished!')
     
 
 if __name__ == '__main__':
