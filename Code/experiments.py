@@ -9,7 +9,7 @@ import multiprocessing as mp
 
 
 from Graph import Graph, RandomGraphGenerator
-from FulfillmentOptimization import Fulfillment, Inventory, PolicyFulfillment, MultiPriceBalanceFulfillment, BalanceFulfillment, FluLpReSolvingFulfillment
+from FulfillmentOptimization import Fulfillment, Inventory, PolicyFulfillment, MultiPriceBalanceFulfillment, BalanceFulfillment, FluLpReSolvingFulfillment, OffLpReSolvingFulfillment, ExtrapolationLpReSolvingFulfillment
 from ModelBased import IndependentDynamicProgram, ModelEstimator, MarkovianDynamicProgram
 from Demand import TemporalIndependenceGenerator, RWGenerator, MarkovianGenerator, Sequence, RandomDistributionGenerator, HiddenMarkovGenerator
 # from LearningPolicy import DepletionAwarePolicy, train_depletion_policy, extract_reward_matrix, SubscriptableDepletionPolicyWrapper, train_depletion_policy_black_box, train_depletion_nn_policy, NNPolicyWrapper
@@ -616,6 +616,12 @@ class Experiment:
         if lp_name == 'fluid_lp_resolving':
             
             return self.process_fluid_lp_resolving()
+        
+        if lp_name == 'offline_lp_resolving':
+            return self.process_off_lp_resolving()
+        
+        if lp_name == 'extrapolation_lp_resolving':
+            return self.process_fluid_extrapolation()
     
     def process_fluid_lp_resolving(self):
         
@@ -677,6 +683,128 @@ class Experiment:
         return policy_output
 
 
+    def process_off_lp_resolving(self):
+        
+        if self.T == 6:
+            re_solving_epochs = [1,2,3,4,5]
+        if self.T ==12:
+            re_solving_epochs = [2,4,6,8,10]
+        if self.T == 18:
+            re_solving_epochs = [3,6,9,12,15]
+            
+        initial_dual_variables = defaultdict(list)
+        # backwards_cumulative_average_demand = defaultdict(list)
+        train_times = defaultdict(list)
+        
+        fulfiller = OffLpReSolvingFulfillment(self.graph)
+        
+        for n_train_samples in self.train_sample_sizes:
+            for sample_id in range(self.n_samples_per_size):
+                
+                train_sample = self.train_samples[n_train_samples][sample_id]
+                
+                start = time.time()
+                
+                
+                
+                # initial_dual_variables[n_train_samples].append(fulfiller.compute_dual_variables(0,self.inventory.initial_inventory,backwards_cumulative_average_demand[n_train_samples][sample_id]))
+                initial_dual_variables[n_train_samples].append(fulfiller.compute_dual_variables(train_sample, 0, self.inventory.initial_inventory, None, False))
+                
+                train_times[n_train_samples].append(time.time()-start)
+        
+        
+        
+        rewards = {}
+        for n_train_samples in self.train_sample_sizes:
+            rewards[n_train_samples] = [0 for _ in range(self.n_samples_per_size)]
+        
+        
+        test_times = defaultdict(list)
+        
+        
+        for n_train_samples in self.train_sample_sizes:
+            for i in range(self.n_samples_per_size):
+                start = time.time()
+                for sequence in self.test_samples:
+                    _, reward, _ = fulfiller.fulfill(sequence, self.inventory, initial_dual_variables[n_train_samples][i],self.train_samples[n_train_samples][i],re_solving_epochs)
+                    # _, reward, _ = fulfiller.fulfill(sequence, self.inventory, initial_dual_variables[n_train_samples][i], backwards_cumulative_average_demand[n_train_samples][i],re_solving_epochs)
+                    rewards[n_train_samples][i] += reward/self.n_test_samples
+                test_times[n_train_samples].append( (time.time()-start)/self.n_test_samples ) 
+                
+                log_output_line(self.instance_id, 'offline_lp_resolving', n_train_samples, i, rewards[n_train_samples][i], train_times[n_train_samples][i], test_times[n_train_samples][i])
+                
+        
+        policy_output = {}
+            
+        for n_train_samples in self.train_sample_sizes:
+            policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples,'offline_lp_resolving')
+        
+        
+        return policy_output
+        
+
+    def process_fluid_extrapolation(self):
+        
+        if self.T == 6:
+            re_solving_epochs = [1,2,3,4,5]
+        if self.T ==12:
+            re_solving_epochs = [2,4,6,8,10]
+        if self.T == 18:
+            re_solving_epochs = [3,6,9,12,15]
+            
+        initial_dual_variables = defaultdict(list)
+        backwards_cumulative_average_demand = defaultdict(list)
+        train_times = defaultdict(list)
+        
+        fulfiller = ExtrapolationLpReSolvingFulfillment(self.graph)
+        
+        for n_train_samples in self.train_sample_sizes:
+            for sample_id in range(self.n_samples_per_size):
+                
+                train_sample = self.train_samples[n_train_samples][sample_id]
+                
+                start = time.time()
+                
+                
+                initial_dual_variables[n_train_samples].append( {supply_node_id: 0 for supply_node_id in self.graph.supply_nodes } )
+                
+                train_times[n_train_samples].append(time.time()-start)
+        
+        
+        
+        rewards = {}
+        for n_train_samples in self.train_sample_sizes:
+            rewards[n_train_samples] = [0 for _ in range(self.n_samples_per_size)]
+        
+        
+        test_times = defaultdict(list)
+        
+        
+        for n_train_samples in self.train_sample_sizes:
+            for i in range(self.n_samples_per_size):
+                start = time.time()
+                for sequence in self.test_samples:
+                    _, reward, _ = fulfiller.fulfill(sequence, self.inventory, initial_dual_variables[n_train_samples][i],re_solving_epochs)
+                    rewards[n_train_samples][i] += reward/self.n_test_samples
+                test_times[n_train_samples].append( (time.time()-start)/self.n_test_samples ) 
+                
+                log_output_line(self.instance_id, 'extrapolation_lp_resolving', n_train_samples, i, rewards[n_train_samples][i], train_times[n_train_samples][i], test_times[n_train_samples][i])
+                
+        
+        policy_output = {}
+            
+        for n_train_samples in self.train_sample_sizes:
+            policy_output[n_train_samples] = PolicyOutput(rewards[n_train_samples], train_times[n_train_samples], test_times[n_train_samples],n_train_samples,'extrapolation_lp_resolving')
+        
+        
+        return policy_output
+
+
+
+
+
+
+
 def main(demand_model):
     
     
@@ -706,20 +834,20 @@ def main(demand_model):
         
     logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
-    train_sample_sizes = [5**(i) for i in range(4)] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
+    train_sample_sizes = [5**(i) for i in range(4)] # RANGE SHOULD GO UP TO 4!! [ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
     n_samples_per_size = 6
     
-    init_inventory = 6
-    T = 18
+    init_inventory = 4
+    T = 12
     
     inventory = Inventory({0:init_inventory, 1:init_inventory, 2:init_inventory}, name = 'test')
     
     data_agnostic_policies = ['myopic', 'balance', 'offline']
-    model_based_dynamic_programs = ['iid_dp', 'indep_dp', 'markov_dp']#, 'time_enhanced_balance', 'supply_enhanced_balance']
+    model_based_dynamic_programs =[]# ['iid_dp', 'indep_dp', 'markov_dp']#, 'time_enhanced_balance', 'supply_enhanced_balance']
     
-    model_free_parametrized_policies = ['time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance', 'neural_opportunity_cost', 'neural_opportunity_cost_with_id']# ['neural_opportunity_cost']#,'time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance']
+    model_free_parametrized_policies = []# ['time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance', 'neural_opportunity_cost', 'neural_opportunity_cost_with_id']# ['neural_opportunity_cost']#,'time_enhanced_balance','supply_enhanced_balance','time-supply_enhanced_balance']
     
-    lp_resolving_policies = ['fluid_lp_resolving']
+    lp_resolving_policies = ['extrapolation_lp_resolving','offline_lp_resolving']
     
     n_test_samples = 5000
     
@@ -949,4 +1077,4 @@ def main(demand_model):
 if __name__ == '__main__':
 
     # main('markov')
-    main('markov')
+    main('indep')

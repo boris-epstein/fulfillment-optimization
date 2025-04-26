@@ -797,8 +797,9 @@ class OffLpReSolvingFulfillment:
             filtered_sample = self.filter_sample(train_sample,t, current_demand_node)
             offline_lp, inventory_constraints = self.programs.offline_linear_program_fixed_inventory_partial_demand(filtered_sample, current_inventories, t+1, current_demand_node.id)
             n_samples = len(filtered_sample)
+            
         else:
-            offline_lp, inventory_constraints = self.programs.offline_linear_program_fixed_inventory_partial_demand(train_sample, current_inventories, t+1, current_demand_node.id)
+            offline_lp, inventory_constraints = self.programs.offline_linear_program_fixed_inventory_partial_demand(train_sample, current_inventories, t+1, None)
             n_samples = len(train_sample)
         offline_lp.optimize()
         
@@ -930,7 +931,118 @@ class FluLpReSolvingFulfillment:
             #otherwise, return the whole sample
             # print(f'returned original sample')
             return train_sample
+         
+         
+class ExtrapolationLpReSolvingFulfillment:
+    
+    def __init__(self, graph: Graph):
+        
+        self.graph = graph
+        self.programs = MathPrograms(graph)
+        
+    def fulfill(self,
+                sequence: Sequence,
+                inventory: Inventory,
+                initial_dual_solution: Dict[int, float],
+                re_solving_epochs: List[int] = None,
+                filter_samples = False,
+                verbose=False,
+                ):
+        
+        collected_rewards = 0
+        lost_sales = 0
+        total_fulfillments = 0
+        number_fulfillments = defaultdict(int) # maps edges to number of times the edge was used
+        
+        T = len(sequence)
+        
+        n_epochs = len(re_solving_epochs)
+        current_epoch_index = 0
+        next_epoch = re_solving_epochs[current_epoch_index]
+        
+        dual_variables = initial_dual_solution
+        
+        current_inventories = inventory.initial_inventory.copy()
+        
+        observed_demand = defaultdict(int)
+        
+        for t, request in enumerate(sequence.requests):    
+            
+            demand_node = self.graph.demand_nodes[request.demand_node]
+            
+            observed_demand[demand_node.id] +=1
+            
+            if t == next_epoch:
+                if verbose:
+                    print(f'Re-solving at {t}')
+                dual_variables = self.compute_dual_variables(t, current_inventories, observed_demand, T)
                 
+                if current_epoch_index == len(re_solving_epochs)-1:
+                    next_epoch = len(sequence) +1
+                else:
+                    current_epoch_index+=1
+                    next_epoch = re_solving_epochs[current_epoch_index]
+                    
+            
+            supply_node_chosen = self.choose_supply_node(demand_node, current_inventories, dual_variables)
+            # print(supply_node_chosen)
+            if supply_node_chosen == -1:
+                if verbose:
+                    print(f'Demand from {demand_node.id} lost')
+                lost_sales+=1
+            
+            else:
+                if verbose:
+                    print(f'Demand from {demand_node.id} fulfilled from warehouse {supply_node_chosen}')
+                current_inventories[supply_node_chosen] -=1
+                number_fulfillments[ supply_node_chosen, demand_node.id] += 1
+                
+                collected_rewards += self.graph.edges[supply_node_chosen, demand_node.id].reward
+
+                total_fulfillments += 1          
+                
+                
+        
+        return number_fulfillments, collected_rewards, lost_sales
+
+
+    def choose_supply_node(self, demand_node: DemandNode, current_inventories, dual_variables):
+        
+        supply_node_chosen = -1
+        best_reward = 0
+        
+        for supply_node_id in demand_node.neighbors:
+            if current_inventories[supply_node_id]>0:
+                pseudo_reward = self.graph.edges[supply_node_id, demand_node.id].reward - dual_variables[supply_node_id]
+                if pseudo_reward>=best_reward:
+                    best_reward = pseudo_reward
+                    supply_node_chosen = supply_node_id
+        
+        return supply_node_chosen
+            
+        
+        
+    def compute_dual_variables(self, t, current_inventories, observed_demand, T):
+        
+        
+        interpolated_demand = {}
+        
+        
+        for demand_node_id in self.graph.demand_nodes:
+            if observed_demand[demand_node_id] == 0:
+                interpolated_demand[demand_node_id] = 0
+            else:
+                interpolated_demand[demand_node_id] =  (T-t-1)*observed_demand[demand_node_id]/(t+1)
+
+        
+        fluid_lp, inventory_constraints = self.programs.fluid_linear_program_fixed_inventory(interpolated_demand, Inventory(current_inventories, 'aux'))
+        fluid_lp.optimize()
+    
+        duals = {(supply_node_id): inventory_constraints[supply_node_id].Pi  for supply_node_id in self.graph.supply_nodes }
+        
+        return duals
+    
+    
 
 class DualMirrorDescentFulfillment:
     
