@@ -693,12 +693,12 @@ def main(demand_model):
     logging.info(f"Experiment {experiment_id} initialized in folder: {experiment_dir}")
 
     
-    parallel = False
+    parallel = True
     
     n_supply_nodes = 3
     n_demand_nodes = 15
     
-    num_instances = 1
+    num_instances = 10
     
     if demand_model =='correl':
         num_instances = 1
@@ -707,10 +707,9 @@ def main(demand_model):
     logging.info(f"Starting experiment {experiment_id} with {num_instances} instances")
     
     train_sample_sizes = [5**(i) for i in range(4)] #[ 10, 50, 100, 500]#, 100, 500]#, 500, 1000, 5000]
-    train_sample_sizes = [20]
-    n_samples_per_size = 3
+    n_samples_per_size = 6
     
-    init_inventory = 2
+    init_inventory = 6
     T = 18
     
     inventory = Inventory({0:init_inventory, 1:init_inventory, 2:init_inventory}, name = 'test')
@@ -757,6 +756,7 @@ def main(demand_model):
     
     logging.info(f'n_instances = {num_instances}')
     logging.info(f'train_sample_sizes = {train_sample_sizes}')
+    logging.info(f'number_samples_per_size = {n_samples_per_size}')
     logging.info(f'n_test_samples = {n_test_samples}')
     logging.info(f'training_budget_per_parameter = {training_budget_per_parameter}')
     logging.info(f'training_budget_cap = {training_budget_cap}')
@@ -949,4 +949,4 @@ def main(demand_model):
 if __name__ == '__main__':
 
     # main('markov')
-    main('correl')
+    main('markov')
