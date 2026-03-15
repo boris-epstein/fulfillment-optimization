@@ -132,15 +132,10 @@ def _solve_highs(builder: LPBuilder):
 
     inf = highspy.kHighsInf
 
-    # Add variables (HiGHS minimizes, so negate objective coefficients)
+    # Add variables with costs (HiGHS minimizes, so negate objective coefficients)
     for i in range(builder.n_vars):
         h.addVar(builder.var_lbs[i], inf)
-
-    if builder.n_vars > 0:
-        h.changeColsCost(
-            list(range(builder.n_vars)),
-            [-c for c in builder.var_objs]
-        )
+        h.changeColCost(i, -builder.var_objs[i])
 
     # Add constraints
     for var_indices, coeffs, sense, rhs in builder.constraints:
@@ -152,8 +147,8 @@ def _solve_highs(builder: LPBuilder):
     h.run()
 
     solution = h.getSolution()
-    info = h.getInfoValue("objective_function_value")
-    obj_val = -info.value  # negate back to maximization
+    _, obj_val_min = h.getInfoValue("objective_function_value")
+    obj_val = -obj_val_min  # negate back to maximization
 
     var_values = list(solution.col_value)
 
