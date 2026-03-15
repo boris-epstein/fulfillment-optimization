@@ -3,8 +3,8 @@
 Three experiments:
   1. d-sensitivity: How does the degree parameter d affect placement quality
      across different load factors?
-  2. SAA convergence: How many samples K does the Offline placement need as
-     instance size grows?
+  2. Sample convergence: How do ALL placement procedures behave as a function
+     of K (SAA samples), using empirical averages for Fluid/Scaled Fluid?
   3. Placement x fulfillment interaction: Does Offline Placement's advantage
      depend on fulfillment policy quality?
 
@@ -17,17 +17,15 @@ import csv
 import logging
 import os
 import time
-from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 
 from Graph import Graph
-from Demand import TemporalIndependenceGenerator, Sequence, Request
+from Demand import TemporalIndependenceGenerator, CorrelGenerator, Sequence
 from MathPrograms import MathPrograms
 from FulfillmentOptimization import (
     Inventory, InventoryOptimizer, Fulfillment,
-    OffLpReSolvingFulfillment, FluLpReSolvingFulfillment,
 )
 
 
@@ -35,62 +33,113 @@ from FulfillmentOptimization import (
 # Graph construction
 # ---------------------------------------------------------------------------
 
-def build_d_regular_graph(n: int, m: int, d: int, rng: np.random.Generator) -> Graph:
-    """Build a random d-regular bipartite graph.
+def build_d_regular_graph(n: int, m: int, d: int, rng: np.random.Generator,
+                          max_attempts: int = 100) -> Graph:
+    """Build a random d-regular bipartite graph with no isolated supply nodes.
 
     Each demand node connects to exactly d distinct warehouses chosen uniformly
-    at random, with edge rewards drawn from Uniform(0, 1).
+    at random, with edge rewards drawn from Uniform(0, 1). Resamples if any
+    supply node ends up disconnected.
 
     Args:
         n: Number of supply nodes (warehouses).
         m: Number of demand nodes.
         d: Degree — each demand node connects to exactly d supply nodes.
         rng: Numpy random generator for reproducibility.
+        max_attempts: Maximum resampling attempts before raising an error.
 
     Returns:
         A Graph instance with the constructed edges.
     """
-    graph = Graph()
-    for i in range(n):
-        graph.add_supply_node(i)
-    for j in range(m):
-        graph.add_demand_node(j)
-
     supply_ids = list(range(n))
-    for j in range(m):
-        neighbors = rng.choice(supply_ids, size=d, replace=False)
-        for i in neighbors:
-            reward = rng.uniform(0, 1)
-            graph.add_edge(i, j, reward)
 
-    graph.populate_neighbors()
-    return graph
+    for _ in range(max_attempts):
+        graph = Graph()
+        for i in range(n):
+            graph.add_supply_node(i)
+        for j in range(m):
+            graph.add_demand_node(j)
+
+        connected_supply = set()
+        edges = []
+        for j in range(m):
+            neighbors = rng.choice(supply_ids, size=d, replace=False)
+            for i in neighbors:
+                reward = rng.uniform(0, 1)
+                edges.append((i, j, reward))
+                connected_supply.add(i)
+
+        if len(connected_supply) == n:
+            for i, j, reward in edges:
+                graph.add_edge(i, j, reward)
+            graph.populate_neighbors()
+            return graph
+
+    raise RuntimeError(
+        f'Could not build a connected d-regular graph after {max_attempts} attempts '
+        f'(n={n}, m={m}, d={d})'
+    )
 
 
 # ---------------------------------------------------------------------------
-# Demand generation (DH-TI: Deterministic-Horizon Temporal Independence)
+# Demand generation
 # ---------------------------------------------------------------------------
 
 def make_dh_ti_generator(demand_nodes: List[int], T: int, weights: np.ndarray,
                          seed: int) -> TemporalIndependenceGenerator:
-    """Create a DH-TI demand generator with uniform per-period probabilities.
-
-    Args:
-        demand_nodes: List of demand node IDs.
-        T: Fixed time horizon (number of arrivals).
-        weights: Probability vector over demand nodes (same every period).
-        seed: Random seed.
-
-    Returns:
-        A TemporalIndependenceGenerator instance.
-    """
+    """Create a DH-TI demand generator (deterministic horizon, IID arrivals)."""
     p = {t: list(weights) for t in range(T)}
     return TemporalIndependenceGenerator(demand_nodes, p, seed)
 
 
-def generate_samples(generator: TemporalIndependenceGenerator, n_samples: int) -> List[Sequence]:
+def make_rh_ti_generator(demand_nodes: List[int], expected_T: int,
+                         weights: np.ndarray, seed: int) -> CorrelGenerator:
+    """Create a RH-TI demand generator (geometric horizon, IID arrivals).
+
+    T ~ Geometric(1/(1+expected_T)), so E[T] = expected_T and
+    Std[T] ≈ expected_T (high variance).
+    """
+    return CorrelGenerator(
+        mean=expected_T,
+        demand_nodes=demand_nodes,
+        weights=list(weights),
+        seed=seed,
+        distribution='geometric',
+    )
+
+
+def make_generator(demand_model: str, demand_nodes: List[int], T: int,
+                   weights: np.ndarray, seed: int):
+    """Dispatch to the appropriate demand generator factory."""
+    if demand_model == 'DH-TI':
+        return make_dh_ti_generator(demand_nodes, T, weights, seed)
+    elif demand_model == 'RH-TI':
+        return make_rh_ti_generator(demand_nodes, T, weights, seed)
+    else:
+        raise ValueError(f'Unknown demand model: {demand_model}')
+
+
+def generate_samples(generator, n_samples: int) -> List[Sequence]:
     """Generate a list of demand sequences from a generator."""
     return [generator.generate_sequence() for _ in range(n_samples)]
+
+
+def empirical_average_demand(demand_nodes: List[int],
+                             samples: List[Sequence]) -> Dict[int, float]:
+    """Compute empirical average demand per demand node from K sample sequences.
+
+    For each sample, counts how many times each demand node appears across all
+    time steps, then averages over all K samples.
+
+    Returns:
+        Dict mapping demand_node_id to average total arrivals across the horizon.
+    """
+    counts = {j: 0.0 for j in demand_nodes}
+    for seq in samples:
+        for req in seq.requests:
+            counts[req.demand_node] += 1.0
+    K = len(samples)
+    return {j: counts[j] / K for j in demand_nodes}
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +322,10 @@ def myopic_placement(graph: Graph, demand_samples: List[Sequence],
     Returns:
         An Inventory object with the greedy placement.
     """
+    # Myopic fulfillment requires a 'myopic' priority list on the graph
+    scores = {(e.supply_node_id, e.demand_node_id): e.reward for e in graph.edges.values()}
+    graph.construct_priority_list('myopic', scores, allow_rejections=False)
+
     optimizer = InventoryOptimizer(graph, solver=solver)
     return optimizer.myopic_greedy_inventory_placement(demand_samples, total_inventory)
 
@@ -280,15 +333,6 @@ def myopic_placement(graph: Graph, demand_samples: List[Sequence],
 # ---------------------------------------------------------------------------
 # Fulfillment policies
 # ---------------------------------------------------------------------------
-
-def compute_initial_shadow_prices(graph: Graph, inventory: Inventory,
-                                  average_demand: Dict[int, float],
-                                  solver: str = 'highs') -> Dict[int, float]:
-    """Compute initial shadow prices from the Fluid LP (used by F-SP and F-SP-R)."""
-    programs = MathPrograms(graph, solver=solver)
-    _, inv_constrs = programs.fluid_linear_program_fixed_inventory(average_demand, inventory)
-    return {s: inv_constrs[s].Pi for s in graph.supply_nodes}
-
 
 def compute_initial_offline_shadow_prices(graph: Graph, inventory: Inventory,
                                           demand_samples: List[Sequence],
@@ -338,54 +382,6 @@ def run_shadow_price_fulfillment(graph: Graph, inventory: Inventory,
     return total_reward / len(test_samples)
 
 
-def run_offline_resolving_fulfillment(graph: Graph, inventory: Inventory,
-                                      test_samples: List[Sequence],
-                                      train_samples: List[Sequence],
-                                      re_solving_epochs: List[int],
-                                      solver: str = 'highs') -> float:
-    """Evaluate the O-SP-R (offline shadow prices with re-solving) policy."""
-    fulfiller = OffLpReSolvingFulfillment(graph, solver=solver)
-
-    initial_duals = {s: 0.0 for s in graph.supply_nodes}
-    # Compute initial duals from training data
-    initial_duals = fulfiller.compute_dual_variables(
-        train_samples, 0, inventory.initial_inventory, None, False
-    )
-
-    total_reward = 0
-    for seq in test_samples:
-        _, reward, _ = fulfiller.fulfill(
-            seq, inventory, initial_duals, train_samples,
-            re_solving_epochs=re_solving_epochs, filter_samples=False
-        )
-        total_reward += reward
-    return total_reward / len(test_samples)
-
-
-def run_fluid_resolving_fulfillment(graph: Graph, inventory: Inventory,
-                                    test_samples: List[Sequence],
-                                    cumulative_avg_demand: Dict[int, Dict[int, float]],
-                                    re_solving_epochs: List[int],
-                                    solver: str = 'highs') -> float:
-    """Evaluate the F-SP-R (fluid shadow prices with re-solving) policy."""
-    fulfiller = FluLpReSolvingFulfillment(graph, solver=solver)
-
-    programs = MathPrograms(graph, solver=solver)
-    _, inv_constrs = programs.fluid_linear_program_fixed_inventory(
-        cumulative_avg_demand[0], inventory
-    )
-    initial_duals = {s: inv_constrs[s].Pi for s in graph.supply_nodes}
-
-    total_reward = 0
-    for seq in test_samples:
-        _, reward, _ = fulfiller.fulfill(
-            seq, inventory, initial_duals, cumulative_avg_demand,
-            re_solving_epochs=re_solving_epochs
-        )
-        total_reward += reward
-    return total_reward / len(test_samples)
-
-
 # ---------------------------------------------------------------------------
 # Prophet's reward (upper bound for normalization)
 # ---------------------------------------------------------------------------
@@ -406,63 +402,24 @@ def compute_prophet_reward(graph: Graph, test_samples: List[Sequence],
 
 
 # ---------------------------------------------------------------------------
-# Cumulative average demand from training samples
-# ---------------------------------------------------------------------------
-
-def compute_cumulative_average_demand(graph: Graph, train_samples: List[Sequence],
-                                      T: int) -> Dict[int, Dict[int, float]]:
-    """Compute backwards cumulative average demand from training samples.
-
-    For each time step t, computes the average remaining demand for each demand
-    node from t to T-1, averaged over all training samples.
-
-    Returns:
-        Dict mapping t -> {demand_node_id: average remaining demand}.
-    """
-    cumulative = {}
-    for t in range(T + 1):
-        cumulative[t] = {j: 0.0 for j in graph.demand_nodes}
-
-    for seq in train_samples:
-        for t in range(T):
-            if t < len(seq):
-                demand_node = seq.requests[t].demand_node
-                for t2 in range(t + 1):
-                    cumulative[t2][demand_node] += 1.0 / len(train_samples)
-
-    return cumulative
-
-
-# ---------------------------------------------------------------------------
-# Re-solving epochs
-# ---------------------------------------------------------------------------
-
-def get_resolving_epochs(T: int, n_epochs: int = 2) -> List[int]:
-    """Compute equi-spaced re-solving epochs within the time horizon.
-
-    For the paper, we use 2 epochs (at roughly 1/3 and 2/3 of T).
-    """
-    return [int(T * (k + 1) / (n_epochs + 1)) for k in range(n_epochs)]
-
-
-# ---------------------------------------------------------------------------
 # Experiment 1: d-sensitivity across load factors
 # ---------------------------------------------------------------------------
 
-def experiment_1(seed: int = 0, solver: str = 'highs', output_dir: str = 'results'):
+def experiment_1(seed: int = 42, solver: str = 'highs', output_dir: str = 'results'):
     """Experiment 1: How does d affect placement quality across load factors?
 
     Varies d in {2, 3, 4, 5, 8} and load factor Q/E[demand] in {0.5, 0.75, 1.0, 1.25, 1.5}.
-    Uses n=8 warehouses, m=15 demand nodes, DH-TI demand with T=60.
-    Evaluates 4 placement procedures under O-SP-R fulfillment.
+    Uses n=8 warehouses, m=15 demand nodes, E[T]=60.
+    Two demand models: DH-TI and RH-TI.
+    Evaluates 4 placement procedures under Myopic and O-SP fulfillment.
     """
     n, m, T = 8, 15, 60
     d_values = [2, 3, 4, 5, 8]
     load_factors = [0.50, 0.75, 1.00, 1.25, 1.50]
-    n_instances = 10
+    demand_models = ['DH-TI', 'RH-TI']
+    n_instances = 20
     K_train = 500
     K_test = 500
-    n_epochs = 2
 
     demand_nodes = list(range(m))
     weights = np.ones(m) / m  # uniform weights
@@ -471,90 +428,96 @@ def experiment_1(seed: int = 0, solver: str = 'highs', output_dir: str = 'result
 
     results = []
 
-    for d in d_values:
-        for load_factor in load_factors:
-            Q = int(round(T * load_factor))
-            re_solving_epochs = get_resolving_epochs(T, n_epochs)
+    for demand_model in demand_models:
+        for d in d_values:
+            for load_factor in load_factors:
+                Q = int(round(T * load_factor))
 
-            logging.info(f'd={d}, load_factor={load_factor}, Q={Q}')
+                logging.info(f'{demand_model}, d={d}, load_factor={load_factor}, Q={Q}')
 
-            for instance_id in range(n_instances):
-                graph_seed = rng_master.integers(0, 2**31)
-                train_seed = rng_master.integers(0, 2**31)
-                test_seed = rng_master.integers(0, 2**31)
-                round_seed = rng_master.integers(0, 2**31)
+                for instance_id in range(n_instances):
+                    graph_seed = rng_master.integers(0, 2**31)
+                    train_seed = rng_master.integers(0, 2**31)
+                    test_seed = rng_master.integers(0, 2**31)
+                    round_seed = rng_master.integers(0, 2**31)
 
-                graph_rng = np.random.default_rng(graph_seed)
-                round_rng = np.random.default_rng(round_seed)
+                    graph_rng = np.random.default_rng(graph_seed)
 
-                graph = build_d_regular_graph(n, m, d, graph_rng)
+                    graph = build_d_regular_graph(n, m, d, graph_rng)
 
-                train_gen = make_dh_ti_generator(demand_nodes, T, weights, train_seed)
-                test_gen = make_dh_ti_generator(demand_nodes, T, weights, test_seed)
-                train_samples = generate_samples(train_gen, K_train)
-                test_samples = generate_samples(test_gen, K_test)
+                    train_gen = make_generator(demand_model, demand_nodes, T, weights, train_seed)
+                    test_gen = make_generator(demand_model, demand_nodes, T, weights, test_seed)
+                    train_samples = generate_samples(train_gen, K_train)
+                    test_samples = generate_samples(test_gen, K_test)
 
-                average_demand = {j: T * weights[j] for j in demand_nodes}
+                    emp_avg = empirical_average_demand(demand_nodes, train_samples)
 
-                prophet = compute_prophet_reward(graph, test_samples, Q, solver)
+                    prophet = compute_prophet_reward(graph, test_samples, Q, solver)
 
-                # --- Placement procedures ---
-                placements = {}
-                placement_times = {}
+                    # --- Placement procedures ---
+                    placements = {}
+                    placement_times = {}
 
-                start = time.time()
-                placements['offline'] = offline_placement(
-                    graph, train_samples, Q, round_rng, solver
-                )
-                placement_times['offline'] = time.time() - start
-
-                start = time.time()
-                placements['fluid'] = fluid_placement(
-                    graph, average_demand, Q, round_rng, solver
-                )
-                placement_times['fluid'] = time.time() - start
-
-                start = time.time()
-                placements['scaled_fluid'] = scaled_fluid_placement(
-                    graph, average_demand, Q, round_rng, solver
-                )
-                placement_times['scaled_fluid'] = time.time() - start
-
-                start = time.time()
-                placements['myopic'] = myopic_placement(
-                    graph, train_samples, Q, solver
-                )
-                placement_times['myopic'] = time.time() - start
-
-                # --- Fulfillment: O-SP-R for all placements ---
-                for placement_name, inventory in placements.items():
-                    reward = run_offline_resolving_fulfillment(
-                        graph, inventory, test_samples, train_samples,
-                        re_solving_epochs, solver
+                    start = time.time()
+                    placements['offline'] = offline_placement(
+                        graph, train_samples, Q,
+                        np.random.default_rng(round_seed), solver
                     )
-                    comp_ratio = reward / prophet if prophet > 0 else 0
+                    placement_times['offline'] = time.time() - start
 
-                    results.append({
-                        'd': d,
-                        'load_factor': load_factor,
-                        'Q': Q,
-                        'instance_id': instance_id,
-                        'placement': placement_name,
-                        'fulfillment': 'O-SP-R',
-                        'reward': reward,
-                        'prophet': prophet,
-                        'competitive_ratio': comp_ratio,
-                        'placement_time': placement_times[placement_name],
-                    })
-
-                logging.info(
-                    f'  instance {instance_id}: prophet={prophet:.2f}, '
-                    + ', '.join(
-                        f'{p}={r["competitive_ratio"]:.4f}'
-                        for p in placements
-                        for r in [results[-len(placements) + list(placements).index(p)]]
+                    start = time.time()
+                    placements['fluid'] = fluid_placement(
+                        graph, emp_avg, Q,
+                        np.random.default_rng(round_seed), solver
                     )
-                )
+                    placement_times['fluid'] = time.time() - start
+
+                    start = time.time()
+                    placements['scaled_fluid'] = scaled_fluid_placement(
+                        graph, emp_avg, Q,
+                        np.random.default_rng(round_seed), solver
+                    )
+                    placement_times['scaled_fluid'] = time.time() - start
+
+                    start = time.time()
+                    placements['myopic'] = myopic_placement(
+                        graph, train_samples, Q, solver
+                    )
+                    placement_times['myopic'] = time.time() - start
+
+                    # --- Fulfillment: Myopic and O-SP for all placements ---
+                    for placement_name, inventory in placements.items():
+                        myopic_reward = run_myopic_fulfillment(
+                            graph, inventory, test_samples, solver
+                        )
+
+                        offline_duals = compute_initial_offline_shadow_prices(
+                            graph, inventory, train_samples, solver
+                        )
+                        osp_reward = run_shadow_price_fulfillment(
+                            graph, inventory, test_samples, offline_duals,
+                            f'O-SP-{demand_model}-{placement_name}-d{d}', solver
+                        )
+
+                        for ful_name, reward in [('Myopic', myopic_reward), ('O-SP', osp_reward)]:
+                            comp_ratio = reward / prophet if prophet > 0 else 0
+                            results.append({
+                                'demand_model': demand_model,
+                                'd': d,
+                                'load_factor': load_factor,
+                                'Q': Q,
+                                'instance_id': instance_id,
+                                'placement': placement_name,
+                                'fulfillment': ful_name,
+                                'reward': reward,
+                                'prophet': prophet,
+                                'competitive_ratio': comp_ratio,
+                                'placement_time': placement_times[placement_name],
+                            })
+
+                    logging.info(
+                        f'  instance {instance_id}: prophet={prophet:.2f}'
+                    )
 
     write_results(results, os.path.join(output_dir, 'experiment_1.csv'))
     return results
@@ -564,80 +527,148 @@ def experiment_1(seed: int = 0, solver: str = 'highs', output_dir: str = 'result
 # Experiment 2: SAA convergence
 # ---------------------------------------------------------------------------
 
-def experiment_2(seed: int = 0, solver: str = 'highs', output_dir: str = 'results'):
-    """Experiment 2: How many SAA samples does Offline Placement need?
+def experiment_2(seed: int = 42, solver: str = 'highs', output_dir: str = 'results'):
+    """Experiment 2: Sample convergence — all placements as a function of K.
 
-    Varies instance size (n, m) in {(3,9), (5,15), (8,15)} and K in
-    {50, 100, 250, 500}. Fixed d=3, load factor=0.75.
-    Reports competitive ratio and solve time.
+    All placements use the same K training samples:
+      - Offline: LP over K samples + Gandhi rounding.
+      - Fluid: Fluid LP using *empirical* average demand from K samples + rounding.
+      - Scaled Fluid: same as Fluid but with scaled empirical demand.
+      - Myopic: greedy simulation over K samples.
+
+    Configuration:
+      - Two demand models: DH-TI and RH-TI.
+      - Two weight settings: uniform (1/m each) and skewed (proportional to
+        total edge reward per demand node).
+      - Two load factors: 0.75 (scarce) and 1.25 (excess).
+      - K in {25, 50, 100, 250, 500}.
+      - n=5, m=15, d=3, E[T]=60, 20 instances per configuration.
+      - Fulfillment: Myopic and O-SP.
     """
-    instance_sizes = [(3, 9), (5, 15), (8, 15)]
-    K_values = [50, 100, 250, 500]
-    d, T = 3, 60
-    load_factor = 0.75
-    n_instances = 10
+    n, m, d, T = 5, 15, 3, 60
+    K_values = [25, 50, 100, 250, 500]
+    load_factors = [0.75, 1.25]
+    weight_settings = ['uniform', 'skewed']
+    demand_models = ['DH-TI', 'RH-TI']
+    n_instances = 20
     K_test = 500
-    n_epochs = 2
+
+    demand_nodes = list(range(m))
 
     rng_master = np.random.default_rng(seed)
 
     results = []
 
-    for n, m in instance_sizes:
-        Q = int(round(T * load_factor))
-        demand_nodes = list(range(m))
-        weights = np.ones(m) / m
-        re_solving_epochs = get_resolving_epochs(T, n_epochs)
+    for demand_model in demand_models:
+        for weight_setting in weight_settings:
+            for load_factor in load_factors:
+                Q = int(round(T * load_factor))
 
-        for instance_id in range(n_instances):
-            graph_seed = rng_master.integers(0, 2**31)
-            test_seed = rng_master.integers(0, 2**31)
-            train_seed_base = rng_master.integers(0, 2**31)
-            round_seed = rng_master.integers(0, 2**31)
+                logging.info(f'{demand_model}, weights={weight_setting}, '
+                             f'load_factor={load_factor}, Q={Q}')
 
-            graph_rng = np.random.default_rng(graph_seed)
-            actual_d = min(d, n)
-            graph = build_d_regular_graph(n, m, actual_d, graph_rng)
+                for instance_id in range(n_instances):
+                    graph_seed = rng_master.integers(0, 2**31)
+                    train_seed = rng_master.integers(0, 2**31)
+                    test_seed = rng_master.integers(0, 2**31)
+                    round_seed = rng_master.integers(0, 2**31)
 
-            test_gen = make_dh_ti_generator(demand_nodes, T, weights, test_seed)
-            test_samples = generate_samples(test_gen, K_test)
+                    graph_rng = np.random.default_rng(graph_seed)
+                    graph = build_d_regular_graph(n, m, d, graph_rng)
 
-            prophet = compute_prophet_reward(graph, test_samples, Q, solver)
+                    # Compute weights based on setting
+                    if weight_setting == 'uniform':
+                        weights = np.ones(m) / m
+                    else:
+                        # Skewed: proportional to total edge reward into each demand node
+                        raw = np.zeros(m)
+                        for e in graph.edges.values():
+                            raw[e.demand_node_id] += e.reward
+                        raw = np.maximum(raw, 1e-8)
+                        weights = raw / raw.sum()
 
-            # Generate the largest training set; subsets for smaller K
-            max_K = max(K_values)
-            train_gen = make_dh_ti_generator(demand_nodes, T, weights, train_seed_base)
-            all_train_samples = generate_samples(train_gen, max_K)
+                    # Generate test samples and the full training pool
+                    test_gen = make_generator(demand_model, demand_nodes, T, weights, test_seed)
+                    test_samples = generate_samples(test_gen, K_test)
 
-            for K in K_values:
-                round_rng = np.random.default_rng(round_seed)
-                train_samples = all_train_samples[:K]
+                    prophet = compute_prophet_reward(graph, test_samples, Q, solver)
 
-                start = time.time()
-                inventory = offline_placement(graph, train_samples, Q, round_rng, solver)
-                solve_time = time.time() - start
+                    max_K = max(K_values)
+                    train_gen = make_generator(demand_model, demand_nodes, T, weights, train_seed)
+                    all_train_samples = generate_samples(train_gen, max_K)
 
-                reward = run_offline_resolving_fulfillment(
-                    graph, inventory, test_samples, train_samples,
-                    re_solving_epochs, solver
-                )
-                comp_ratio = reward / prophet if prophet > 0 else 0
+                    for K in K_values:
+                        train_samples = all_train_samples[:K]
 
-                results.append({
-                    'n': n,
-                    'm': m,
-                    'K': K,
-                    'instance_id': instance_id,
-                    'reward': reward,
-                    'prophet': prophet,
-                    'competitive_ratio': comp_ratio,
-                    'solve_time': solve_time,
-                })
+                        # Empirical average demand from K samples
+                        emp_avg = empirical_average_demand(demand_nodes, train_samples)
 
-                logging.info(
-                    f'  n={n}, m={m}, K={K}, instance={instance_id}: '
-                    f'ratio={comp_ratio:.4f}, time={solve_time:.2f}s'
-                )
+                        # --- All four placements ---
+                        placements = {}
+                        placement_times = {}
+
+                        start = time.time()
+                        placements['offline'] = offline_placement(
+                            graph, train_samples, Q,
+                            np.random.default_rng(round_seed), solver
+                        )
+                        placement_times['offline'] = time.time() - start
+
+                        start = time.time()
+                        placements['fluid'] = fluid_placement(
+                            graph, emp_avg, Q,
+                            np.random.default_rng(round_seed), solver
+                        )
+                        placement_times['fluid'] = time.time() - start
+
+                        start = time.time()
+                        placements['scaled_fluid'] = scaled_fluid_placement(
+                            graph, emp_avg, Q,
+                            np.random.default_rng(round_seed), solver
+                        )
+                        placement_times['scaled_fluid'] = time.time() - start
+
+                        start = time.time()
+                        placements['myopic'] = myopic_placement(
+                            graph, train_samples, Q, solver
+                        )
+                        placement_times['myopic'] = time.time() - start
+
+                        # --- Evaluate each placement with Myopic and O-SP ---
+                        for placement_name, inventory in placements.items():
+                            myopic_reward = run_myopic_fulfillment(
+                                graph, inventory, test_samples, solver
+                            )
+
+                            offline_duals = compute_initial_offline_shadow_prices(
+                                graph, inventory, train_samples, solver
+                            )
+                            osp_reward = run_shadow_price_fulfillment(
+                                graph, inventory, test_samples, offline_duals,
+                                f'O-SP-{demand_model}-{placement_name}-K{K}', solver
+                            )
+
+                            for ful_name, reward in [('Myopic', myopic_reward), ('O-SP', osp_reward)]:
+                                comp_ratio = reward / prophet if prophet > 0 else 0
+                                results.append({
+                                    'demand_model': demand_model,
+                                    'weight_setting': weight_setting,
+                                    'load_factor': load_factor,
+                                    'Q': Q,
+                                    'K': K,
+                                    'instance_id': instance_id,
+                                    'placement': placement_name,
+                                    'fulfillment': ful_name,
+                                    'reward': reward,
+                                    'prophet': prophet,
+                                    'competitive_ratio': comp_ratio,
+                                    'placement_time': placement_times[placement_name],
+                                })
+
+                        logging.info(
+                            f'  {demand_model}, weights={weight_setting}, load={load_factor}, '
+                            f'K={K}, instance={instance_id}: done'
+                        )
 
     write_results(results, os.path.join(output_dir, 'experiment_2.csv'))
     return results
@@ -647,125 +678,95 @@ def experiment_2(seed: int = 0, solver: str = 'highs', output_dir: str = 'result
 # Experiment 3: Placement x Fulfillment interaction
 # ---------------------------------------------------------------------------
 
-def experiment_3(seed: int = 0, solver: str = 'highs', output_dir: str = 'results'):
+def experiment_3(seed: int = 42, solver: str = 'highs', output_dir: str = 'results'):
     """Experiment 3: How does fulfillment quality interact with placement?
 
-    Full cross of 4 placements x 5 fulfillment policies.
-    Fixed n=5, m=15, d=3, load factor=0.75, DH-TI demand.
+    Full cross of 4 placements x 2 fulfillment policies (Myopic, O-SP).
+    Two demand models: DH-TI and RH-TI.
+    Fixed n=5, m=15, d=3, load factor=0.75.
+    All placements use empirical average demand from training samples.
     """
     n, m, d, T = 5, 15, 3, 60
     load_factor = 0.75
     Q = int(round(T * load_factor))
-    n_instances = 10
+    demand_models = ['DH-TI', 'RH-TI']
+    n_instances = 20
     K_train = 500
     K_test = 500
-    n_epochs = 2
 
     demand_nodes = list(range(m))
     weights = np.ones(m) / m
-    average_demand = {j: T * weights[j] for j in demand_nodes}
-    re_solving_epochs = get_resolving_epochs(T, n_epochs)
 
     rng_master = np.random.default_rng(seed)
 
     results = []
 
-    for instance_id in range(n_instances):
-        graph_seed = rng_master.integers(0, 2**31)
-        train_seed = rng_master.integers(0, 2**31)
-        test_seed = rng_master.integers(0, 2**31)
-        round_seed = rng_master.integers(0, 2**31)
+    for demand_model in demand_models:
+        for instance_id in range(n_instances):
+            graph_seed = rng_master.integers(0, 2**31)
+            train_seed = rng_master.integers(0, 2**31)
+            test_seed = rng_master.integers(0, 2**31)
+            round_seed = rng_master.integers(0, 2**31)
 
-        graph_rng = np.random.default_rng(graph_seed)
-        round_rng = np.random.default_rng(round_seed)
+            graph_rng = np.random.default_rng(graph_seed)
 
-        graph = build_d_regular_graph(n, m, d, graph_rng)
+            graph = build_d_regular_graph(n, m, d, graph_rng)
 
-        train_gen = make_dh_ti_generator(demand_nodes, T, weights, train_seed)
-        test_gen = make_dh_ti_generator(demand_nodes, T, weights, test_seed)
-        train_samples = generate_samples(train_gen, K_train)
-        test_samples = generate_samples(test_gen, K_test)
+            train_gen = make_generator(demand_model, demand_nodes, T, weights, train_seed)
+            test_gen = make_generator(demand_model, demand_nodes, T, weights, test_seed)
+            train_samples = generate_samples(train_gen, K_train)
+            test_samples = generate_samples(test_gen, K_test)
 
-        prophet = compute_prophet_reward(graph, test_samples, Q, solver)
+            emp_avg = empirical_average_demand(demand_nodes, train_samples)
 
-        # --- Compute placements ---
-        placements = {}
+            prophet = compute_prophet_reward(graph, test_samples, Q, solver)
 
-        placements['offline'] = offline_placement(
-            graph, train_samples, Q, np.random.default_rng(round_seed), solver
-        )
-        placements['fluid'] = fluid_placement(
-            graph, average_demand, Q, np.random.default_rng(round_seed), solver
-        )
-        placements['scaled_fluid'] = scaled_fluid_placement(
-            graph, average_demand, Q, np.random.default_rng(round_seed), solver
-        )
-        placements['myopic'] = myopic_placement(
-            graph, train_samples, Q, solver
-        )
+            # --- Compute placements (Fluid/Scaled Fluid use empirical averages) ---
+            placements = {}
 
-        # --- Precompute cumulative average demand for F-SP-R ---
-        cumulative_avg_demand = compute_cumulative_average_demand(
-            graph, train_samples, T
-        )
-
-        # --- Evaluate all (placement, fulfillment) pairs ---
-        for placement_name, inventory in placements.items():
-
-            # 1. Myopic fulfillment
-            reward = run_myopic_fulfillment(graph, inventory, test_samples, solver)
-            results.append(_make_result(
-                instance_id, placement_name, 'Myopic', reward, prophet
-            ))
-
-            # 2. F-SP (fluid shadow prices, no re-solving)
-            fluid_duals = compute_initial_shadow_prices(
-                graph, inventory, average_demand, solver
+            placements['offline'] = offline_placement(
+                graph, train_samples, Q, np.random.default_rng(round_seed), solver
             )
-            reward = run_shadow_price_fulfillment(
-                graph, inventory, test_samples, fluid_duals, 'F-SP', solver
+            placements['fluid'] = fluid_placement(
+                graph, emp_avg, Q, np.random.default_rng(round_seed), solver
             )
-            results.append(_make_result(
-                instance_id, placement_name, 'F-SP', reward, prophet
-            ))
+            placements['scaled_fluid'] = scaled_fluid_placement(
+                graph, emp_avg, Q, np.random.default_rng(round_seed), solver
+            )
+            placements['myopic'] = myopic_placement(
+                graph, train_samples, Q, solver
+            )
 
-            # 3. O-SP (offline shadow prices, no re-solving)
-            offline_duals = compute_initial_offline_shadow_prices(
-                graph, inventory, train_samples, solver
-            )
-            reward = run_shadow_price_fulfillment(
-                graph, inventory, test_samples, offline_duals, 'O-SP', solver
-            )
-            results.append(_make_result(
-                instance_id, placement_name, 'O-SP', reward, prophet
-            ))
+            # --- Evaluate all (placement, fulfillment) pairs ---
+            for placement_name, inventory in placements.items():
 
-            # 4. F-SP-R (fluid shadow prices with re-solving)
-            reward = run_fluid_resolving_fulfillment(
-                graph, inventory, test_samples, cumulative_avg_demand,
-                re_solving_epochs, solver
-            )
-            results.append(_make_result(
-                instance_id, placement_name, 'F-SP-R', reward, prophet
-            ))
+                # 1. Myopic fulfillment
+                reward = run_myopic_fulfillment(graph, inventory, test_samples, solver)
+                results.append(_make_result(
+                    demand_model, instance_id, placement_name, 'Myopic', reward, prophet
+                ))
 
-            # 5. O-SP-R (offline shadow prices with re-solving)
-            reward = run_offline_resolving_fulfillment(
-                graph, inventory, test_samples, train_samples,
-                re_solving_epochs, solver
-            )
-            results.append(_make_result(
-                instance_id, placement_name, 'O-SP-R', reward, prophet
-            ))
+                # 2. O-SP (offline shadow prices, no re-solving)
+                offline_duals = compute_initial_offline_shadow_prices(
+                    graph, inventory, train_samples, solver
+                )
+                reward = run_shadow_price_fulfillment(
+                    graph, inventory, test_samples, offline_duals,
+                    f'O-SP-{demand_model}-{placement_name}', solver
+                )
+                results.append(_make_result(
+                    demand_model, instance_id, placement_name, 'O-SP', reward, prophet
+                ))
 
-        logging.info(f'  instance {instance_id} done (prophet={prophet:.2f})')
+            logging.info(f'  {demand_model}, instance {instance_id} done (prophet={prophet:.2f})')
 
     write_results(results, os.path.join(output_dir, 'experiment_3.csv'))
     return results
 
 
-def _make_result(instance_id, placement, fulfillment, reward, prophet):
+def _make_result(demand_model, instance_id, placement, fulfillment, reward, prophet):
     return {
+        'demand_model': demand_model,
         'instance_id': instance_id,
         'placement': placement,
         'fulfillment': fulfillment,
