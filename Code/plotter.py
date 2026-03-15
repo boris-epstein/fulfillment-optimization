@@ -16,11 +16,10 @@ import pandas as pd
 PLACEMENT_STYLES = {
     'offline':      {'color': '#1f77b4', 'marker': 'o', 'label': 'Offline'},
     'fluid':        {'color': '#ff7f0e', 'marker': 's', 'label': 'Fluid'},
-    'scaled_fluid': {'color': '#2ca02c', 'marker': '^', 'label': 'Scaled Fluid'},
     'myopic':       {'color': '#d62728', 'marker': 'D', 'label': 'Myopic Pl.'},
 }
 
-PLACEMENT_ORDER = ['offline', 'fluid', 'scaled_fluid', 'myopic']
+PLACEMENT_ORDER = ['offline', 'fluid', 'myopic']
 
 
 def load_csv(input_dir: str, experiment: int) -> pd.DataFrame:

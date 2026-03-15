@@ -225,7 +225,7 @@ def gandhi_round(fractional_placement: Dict[int, float], total_inventory: int,
 
 def offline_placement(graph: Graph, demand_samples: List[Sequence],
                       total_inventory: int, rng: np.random.Generator,
-                      solver: str = 'highs') -> Inventory:
+                      solver: str = 'highs'):
     """Compute Offline Placement: optimize the Offline surrogate via LP + rounding.
 
     Args:
@@ -236,7 +236,8 @@ def offline_placement(graph: Graph, demand_samples: List[Sequence],
         solver: LP solver backend.
 
     Returns:
-        An Inventory object with the rounded placement.
+        Tuple of (Inventory, was_rounded: bool). was_rounded is True if the LP
+        solution had fractional entries that required Gandhi rounding.
     """
     programs = MathPrograms(graph, solver=solver)
     result, x_vars = programs.offline_linear_program_variable_inventory(
@@ -244,13 +245,14 @@ def offline_placement(graph: Graph, demand_samples: List[Sequence],
     )
 
     fractional = {s: x_vars[s].X for s in graph.supply_nodes}
+    was_rounded = any(0 < (v - int(v)) < 1 - 1e-12 and (v - int(v)) > 1e-12 for v in fractional.values())
     rounded = gandhi_round(fractional, total_inventory, rng)
-    return Inventory(rounded, 'offline')
+    return Inventory(rounded, 'offline'), was_rounded
 
 
 def fluid_placement(graph: Graph, average_demand: Dict[int, float],
                     total_inventory: int, rng: np.random.Generator,
-                    solver: str = 'highs') -> Inventory:
+                    solver: str = 'highs'):
     """Compute Fluid Placement: optimize the Fluid surrogate via LP + rounding.
 
     Args:
@@ -261,7 +263,8 @@ def fluid_placement(graph: Graph, average_demand: Dict[int, float],
         solver: LP solver backend.
 
     Returns:
-        An Inventory object with the rounded placement.
+        Tuple of (Inventory, was_rounded: bool). was_rounded is True if the LP
+        solution had fractional entries that required Gandhi rounding.
     """
     programs = MathPrograms(graph, solver=solver)
     result, x_vars = programs.fluid_linear_program_variable_inventory(
@@ -269,17 +272,19 @@ def fluid_placement(graph: Graph, average_demand: Dict[int, float],
     )
 
     fractional = {s: x_vars[s].X for s in graph.supply_nodes}
+    was_rounded = any(0 < (v - int(v)) < 1 - 1e-12 and (v - int(v)) > 1e-12 for v in fractional.values())
     rounded = gandhi_round(fractional, total_inventory, rng)
-    return Inventory(rounded, 'fluid')
+    return Inventory(rounded, 'fluid'), was_rounded
 
 
 def scaled_fluid_placement(graph: Graph, average_demand: Dict[int, float],
                            total_inventory: int, rng: np.random.Generator,
-                           solver: str = 'highs') -> Inventory:
+                           solver: str = 'highs'):
     """Compute Scaled-Demand Fluid Placement.
 
-    Scales expected demand so that total expected demand equals total inventory,
-    then solves the Fluid LP and rounds.
+    Scales expected demand up so that total expected demand equals total inventory,
+    but only when expected demand exceeds Q (i.e., estimated load factor < 1).
+    When demand <= Q, behaves identically to Fluid Placement.
 
     Args:
         graph: Bipartite graph.
@@ -292,8 +297,11 @@ def scaled_fluid_placement(graph: Graph, average_demand: Dict[int, float],
         An Inventory object with the rounded placement.
     """
     total_demand = sum(average_demand.values())
-    scale = total_inventory / total_demand if total_demand > 0 else 1.0
-    scaled_demand = {j: avg * scale for j, avg in average_demand.items()}
+    if total_demand > total_inventory:
+        scale = total_inventory / total_demand
+        scaled_demand = {j: avg * scale for j, avg in average_demand.items()}
+    else:
+        scaled_demand = average_demand
 
     programs = MathPrograms(graph, solver=solver)
     result, x_vars = programs.fluid_linear_program_variable_inventory(
@@ -301,8 +309,9 @@ def scaled_fluid_placement(graph: Graph, average_demand: Dict[int, float],
     )
 
     fractional = {s: x_vars[s].X for s in graph.supply_nodes}
+    was_rounded = any(0 < (v - int(v)) < 1 - 1e-12 and (v - int(v)) > 1e-12 for v in fractional.values())
     rounded = gandhi_round(fractional, total_inventory, rng)
-    return Inventory(rounded, 'scaled_fluid')
+    return Inventory(rounded, 'scaled_fluid'), was_rounded
 
 
 def myopic_placement(graph: Graph, demand_samples: List[Sequence],
@@ -411,13 +420,14 @@ def experiment_1(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
     Varies d in {2, 3, 4, 5, 8} and load factor Q/E[demand] in {0.5, 0.75, 1.0, 1.25, 1.5}.
     Uses n=8 warehouses, m=15 demand nodes, E[T]=60.
     Two demand models: DH-TI and RH-TI.
-    Evaluates 4 placement procedures under Myopic and O-SP fulfillment.
+    Evaluates 3 placement procedures (Offline, Fluid, Myopic) under Myopic and O-SP fulfillment.
+    Fluid placement scales demand only when estimated load > 1.
     """
     n, m, T = 8, 15, 60
-    d_values = [2, 3, 4, 5, 8]
+    d_values = [2, 4, 6, 8]
     load_factors = [0.50, 0.75, 1.00, 1.25, 1.50]
     demand_models = ['DH-TI', 'RH-TI']
-    n_instances = 20
+    n_instances = 10
     K_train = 500
     K_test = 500
 
@@ -457,33 +467,30 @@ def experiment_1(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
                     # --- Placement procedures ---
                     placements = {}
                     placement_times = {}
+                    placement_rounded = {}
 
                     start = time.time()
-                    placements['offline'] = offline_placement(
+                    placements['offline'], placement_rounded['offline'] = offline_placement(
                         graph, train_samples, Q,
                         np.random.default_rng(round_seed), solver
                     )
                     placement_times['offline'] = time.time() - start
 
                     start = time.time()
-                    placements['fluid'] = fluid_placement(
+                    inv, rnd = scaled_fluid_placement(
                         graph, emp_avg, Q,
                         np.random.default_rng(round_seed), solver
                     )
+                    placements['fluid'] = inv
+                    placement_rounded['fluid'] = rnd
                     placement_times['fluid'] = time.time() - start
-
-                    start = time.time()
-                    placements['scaled_fluid'] = scaled_fluid_placement(
-                        graph, emp_avg, Q,
-                        np.random.default_rng(round_seed), solver
-                    )
-                    placement_times['scaled_fluid'] = time.time() - start
 
                     start = time.time()
                     placements['myopic'] = myopic_placement(
                         graph, train_samples, Q, solver
                     )
                     placement_times['myopic'] = time.time() - start
+                    placement_rounded['myopic'] = False  # greedy, always integral
 
                     # --- Fulfillment: Myopic and O-SP for all placements ---
                     for placement_name, inventory in placements.items():
@@ -513,6 +520,7 @@ def experiment_1(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
                                 'prophet': prophet,
                                 'competitive_ratio': comp_ratio,
                                 'placement_time': placement_times[placement_name],
+                                'was_rounded': placement_rounded[placement_name],
                             })
 
                     logging.info(
@@ -533,7 +541,7 @@ def experiment_2(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
     All placements use the same K training samples:
       - Offline: LP over K samples + Gandhi rounding.
       - Fluid: Fluid LP using *empirical* average demand from K samples + rounding.
-      - Scaled Fluid: same as Fluid but with scaled empirical demand.
+        Scales demand only when estimated load > 1.
       - Myopic: greedy simulation over K samples.
 
     Configuration:
@@ -541,16 +549,16 @@ def experiment_2(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
       - Two weight settings: uniform (1/m each) and skewed (proportional to
         total edge reward per demand node).
       - Two load factors: 0.75 (scarce) and 1.25 (excess).
-      - K in {25, 50, 100, 250, 500}.
+      - K in {5, 10, 25, 50, 100, 250, 500}.
       - n=5, m=15, d=3, E[T]=60, 20 instances per configuration.
       - Fulfillment: Myopic and O-SP.
     """
     n, m, d, T = 5, 15, 3, 60
-    K_values = [25, 50, 100, 250, 500]
+    K_values = [5, 10, 25, 50, 100, 250, 500]
     load_factors = [0.75, 1.25]
     weight_settings = ['uniform', 'skewed']
     demand_models = ['DH-TI', 'RH-TI']
-    n_instances = 20
+    n_instances = 10
     K_test = 500
 
     demand_nodes = list(range(m))
@@ -603,36 +611,33 @@ def experiment_2(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
                         # Empirical average demand from K samples
                         emp_avg = empirical_average_demand(demand_nodes, train_samples)
 
-                        # --- All four placements ---
+                        # --- All three placements ---
                         placements = {}
                         placement_times = {}
+                        placement_rounded = {}
 
                         start = time.time()
-                        placements['offline'] = offline_placement(
+                        placements['offline'], placement_rounded['offline'] = offline_placement(
                             graph, train_samples, Q,
                             np.random.default_rng(round_seed), solver
                         )
                         placement_times['offline'] = time.time() - start
 
                         start = time.time()
-                        placements['fluid'] = fluid_placement(
+                        inv, rnd = scaled_fluid_placement(
                             graph, emp_avg, Q,
                             np.random.default_rng(round_seed), solver
                         )
+                        placements['fluid'] = inv
+                        placement_rounded['fluid'] = rnd
                         placement_times['fluid'] = time.time() - start
-
-                        start = time.time()
-                        placements['scaled_fluid'] = scaled_fluid_placement(
-                            graph, emp_avg, Q,
-                            np.random.default_rng(round_seed), solver
-                        )
-                        placement_times['scaled_fluid'] = time.time() - start
 
                         start = time.time()
                         placements['myopic'] = myopic_placement(
                             graph, train_samples, Q, solver
                         )
                         placement_times['myopic'] = time.time() - start
+                        placement_rounded['myopic'] = False
 
                         # --- Evaluate each placement with Myopic and O-SP ---
                         for placement_name, inventory in placements.items():
@@ -663,6 +668,7 @@ def experiment_2(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
                                     'prophet': prophet,
                                     'competitive_ratio': comp_ratio,
                                     'placement_time': placement_times[placement_name],
+                                    'was_rounded': placement_rounded[placement_name],
                                 })
 
                         logging.info(
@@ -681,16 +687,17 @@ def experiment_2(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
 def experiment_3(seed: int = 42, solver: str = 'highs', output_dir: str = 'results'):
     """Experiment 3: How does fulfillment quality interact with placement?
 
-    Full cross of 4 placements x 2 fulfillment policies (Myopic, O-SP).
+    Full cross of 3 placements x 2 fulfillment policies (Myopic, O-SP).
     Two demand models: DH-TI and RH-TI.
-    Fixed n=5, m=15, d=3, load factor=0.75.
+    Fixed n=5, m=15, d=2, load factor=0.75.
     All placements use empirical average demand from training samples.
+    Fluid placement scales demand only when estimated load > 1.
     """
-    n, m, d, T = 5, 15, 3, 60
+    n, m, d, T = 5, 15, 2, 60
     load_factor = 0.75
     Q = int(round(T * load_factor))
     demand_models = ['DH-TI', 'RH-TI']
-    n_instances = 20
+    n_instances = 10
     K_train = 500
     K_test = 500
 
@@ -721,21 +728,22 @@ def experiment_3(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
 
             prophet = compute_prophet_reward(graph, test_samples, Q, solver)
 
-            # --- Compute placements (Fluid/Scaled Fluid use empirical averages) ---
+            # --- Compute placements (Fluid uses empirical averages, scales if load > 1) ---
             placements = {}
+            placement_rounded = {}
 
-            placements['offline'] = offline_placement(
+            placements['offline'], placement_rounded['offline'] = offline_placement(
                 graph, train_samples, Q, np.random.default_rng(round_seed), solver
             )
-            placements['fluid'] = fluid_placement(
+            inv, rnd = scaled_fluid_placement(
                 graph, emp_avg, Q, np.random.default_rng(round_seed), solver
             )
-            placements['scaled_fluid'] = scaled_fluid_placement(
-                graph, emp_avg, Q, np.random.default_rng(round_seed), solver
-            )
+            placements['fluid'] = inv
+            placement_rounded['fluid'] = rnd
             placements['myopic'] = myopic_placement(
                 graph, train_samples, Q, solver
             )
+            placement_rounded['myopic'] = False
 
             # --- Evaluate all (placement, fulfillment) pairs ---
             for placement_name, inventory in placements.items():
@@ -743,7 +751,8 @@ def experiment_3(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
                 # 1. Myopic fulfillment
                 reward = run_myopic_fulfillment(graph, inventory, test_samples, solver)
                 results.append(_make_result(
-                    demand_model, instance_id, placement_name, 'Myopic', reward, prophet
+                    demand_model, instance_id, placement_name, 'Myopic', reward, prophet,
+                    placement_rounded[placement_name]
                 ))
 
                 # 2. O-SP (offline shadow prices, no re-solving)
@@ -755,7 +764,8 @@ def experiment_3(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
                     f'O-SP-{demand_model}-{placement_name}', solver
                 )
                 results.append(_make_result(
-                    demand_model, instance_id, placement_name, 'O-SP', reward, prophet
+                    demand_model, instance_id, placement_name, 'O-SP', reward, prophet,
+                    placement_rounded[placement_name]
                 ))
 
             logging.info(f'  {demand_model}, instance {instance_id} done (prophet={prophet:.2f})')
@@ -764,7 +774,8 @@ def experiment_3(seed: int = 42, solver: str = 'highs', output_dir: str = 'resul
     return results
 
 
-def _make_result(demand_model, instance_id, placement, fulfillment, reward, prophet):
+def _make_result(demand_model, instance_id, placement, fulfillment, reward, prophet,
+                  was_rounded=False):
     return {
         'demand_model': demand_model,
         'instance_id': instance_id,
@@ -773,6 +784,7 @@ def _make_result(demand_model, instance_id, placement, fulfillment, reward, prop
         'reward': reward,
         'prophet': prophet,
         'competitive_ratio': reward / prophet if prophet > 0 else 0,
+        'was_rounded': was_rounded,
     }
 
 
