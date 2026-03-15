@@ -3,9 +3,7 @@ from Demand import CorrelGenerator, Sequence, Request
 from MathPrograms import MathPrograms
 from collections import defaultdict
 import numpy as np
-import gurobipy as gp
 from typing import List, Dict, Union, Tuple
-from sortedcontainers import SortedDict
 from copy import deepcopy
 
 
@@ -31,9 +29,9 @@ class InventoryOptimizer:
     and myopic greedy placement.
     """
 
-    def __init__(self, graph: Graph):
+    def __init__(self, graph: Graph, solver: str = 'gurobi'):
         self.graph = graph
-        self.programs = MathPrograms(self.graph)
+        self.programs = MathPrograms(self.graph, solver=solver)
         self.converter = FormatConverter()
 
     def set_inventory_to_n(self, n: int) -> Dict[int, int]:
@@ -279,9 +277,9 @@ class Fulfillment:
     fulfillment (periodically recompute priority lists using LP shadow prices).
     """
 
-    def __init__(self, graph: Graph, resolve_seed: int = 0, train_generator: CorrelGenerator = None) -> None:
+    def __init__(self, graph: Graph, resolve_seed: int = 0, train_generator: CorrelGenerator = None, solver: str = 'gurobi') -> None:
         self.graph = graph
-        self.programs = MathPrograms(graph)
+        self.programs = MathPrograms(graph, solver=solver)
         self.setup_resolve_generator(train_generator, resolve_seed)
 
     def setup_resolve_generator(self, train_generator: CorrelGenerator, resolve_seed: int):
@@ -806,9 +804,9 @@ class OffLpReSolvingFulfillment:
     choosing supply nodes.
     """
 
-    def __init__(self, graph: Graph):
+    def __init__(self, graph: Graph, solver: str = 'gurobi'):
         self.graph = graph
-        self.programs = MathPrograms(graph)
+        self.programs = MathPrograms(graph, solver=solver)
 
     def fulfill(self, sequence: Sequence, inventory: Inventory,
                 initial_dual_solution: Dict[int, float],
@@ -945,9 +943,9 @@ class FluLpReSolvingFulfillment:
     the fluid LP, then extracts dual variables as opportunity costs.
     """
 
-    def __init__(self, graph: Graph):
+    def __init__(self, graph: Graph, solver: str = 'gurobi'):
         self.graph = graph
-        self.programs = MathPrograms(graph)
+        self.programs = MathPrograms(graph, solver=solver)
 
     def fulfill(self, sequence: Sequence, inventory: Inventory,
                 initial_dual_solution: Dict[int, float],
@@ -1064,9 +1062,9 @@ class ExtrapolationLpReSolvingFulfillment:
     Does not require training data at fulfillment time.
     """
 
-    def __init__(self, graph: Graph):
+    def __init__(self, graph: Graph, solver: str = 'gurobi'):
         self.graph = graph
-        self.programs = MathPrograms(graph)
+        self.programs = MathPrograms(graph, solver=solver)
 
     def fulfill(self, sequence: Sequence, inventory: Inventory,
                 initial_dual_solution: Dict[int, float],

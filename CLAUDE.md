@@ -15,7 +15,7 @@ All source code lives in `Code/`. There is no package structure — modules impo
 - **Graph.py** — Bipartite graph data structures (`Graph`, `Node`, `DemandNode`, `Edge`) and random graph generation
 - **Demand.py** — Demand sequence generation under various stochastic models (independent, Markov, random walk, HMM, correlated)
 - **FulfillmentOptimization.py** — Core fulfillment policies: myopic, balance, multi-price balance, LP re-solving (fluid, offline, extrapolation), dual mirror descent, and policy-based fulfillment
-- **MathPrograms.py** — Gurobi LP formulations (fluid LP, offline LP) used by re-solving policies
+- **MathPrograms.py** — LP formulations (fluid LP, offline LP) with a solver abstraction layer supporting Gurobi and HiGHS backends
 - **ModelBased.py** — Dynamic programming solutions (independent DP, Markovian DP) and distribution estimation from samples
 - **ModelFree.py** — Parametrized policies optimized via Nevergrad: threshold-based, enhanced balance variants, neural opportunity cost
 - **experiments.py** — Experiment orchestration: instance generation, parallel execution, result collection, CSV output
@@ -24,7 +24,8 @@ All source code lives in `Code/`. There is no package structure — modules impo
 ## Dependencies
 
 - `numpy` — numerical computation
-- `gurobipy` — LP/optimization solver (requires Gurobi license)
+- `gurobipy` — LP/optimization solver (requires Gurobi license; default backend)
+- `highspy` — HiGHS LP solver (free/open-source alternative backend)
 - `sortedcontainers` — sorted data structures
 - `nevergrad` — derivative-free optimization (model-free policy training)
 - `torch` — neural network policies
@@ -39,6 +40,7 @@ python experiments.py
 
 The `main()` function in `experiments.py` configures and runs the full experiment. Key parameters are set at the top of `main()`:
 - `demand_model`: one of `'indep'`, `'markov'`, `'rw'`, `'correl'`
+- `solver`: `'gurobi'` (default) or `'highs'` — LP solver backend
 - `n_supply_nodes`, `n_demand_nodes`: graph size
 - `train_sample_sizes`: list of training set sizes to evaluate
 - `parallel`: whether to use multiprocessing

@@ -79,6 +79,7 @@ def run_single_instance(args):
         optimal_policy,
         training_budget_cap,
         experiment_dir,
+        solver,
     ) = args
 
     def setup_instance_logger(experiment_dir: str, instance_id: int):
@@ -122,6 +123,7 @@ def run_single_instance(args):
         training_budget_per_parameter,
         training_budget_cap,
         optimal_policy if demand_model in ['indep', 'markov'] else None,
+        solver=solver,
     )
 
     result = experiment.conduct_experiment()
@@ -303,7 +305,8 @@ class Experiment:
                  inventory: Inventory,
                  training_budget_per_parameter: int,
                  training_budget_cap: int,
-                 optimal_policy=None):
+                 optimal_policy=None,
+                 solver: str = 'gurobi'):
         self.demand_model = demand_model
         self.instance_id = instance_id
         self.graph = graph
@@ -322,9 +325,10 @@ class Experiment:
         self.n_test_samples = len(test_samples)
         self.training_budget_per_parameter = training_budget_per_parameter
         self.training_budget_cap = training_budget_cap
+        self.solver = solver
         self.T = len(test_samples[0])
 
-        self.math_progs = MathPrograms(self.graph)
+        self.math_progs = MathPrograms(self.graph, solver=solver)
 
     def conduct_experiment(self) -> Dict[any, PolicyOutput]:
         """Run all configured policies and collect results.
@@ -613,7 +617,7 @@ class Experiment:
         backwards_cumulative_average_demand = defaultdict(list)
         train_times = defaultdict(list)
 
-        fulfiller = FluLpReSolvingFulfillment(self.graph)
+        fulfiller = FluLpReSolvingFulfillment(self.graph, solver=self.solver)
 
         for n_train_samples in self.train_sample_sizes:
             for sample_id in range(self.n_samples_per_size):
@@ -677,7 +681,7 @@ class Experiment:
         initial_dual_variables = defaultdict(list)
         train_times = defaultdict(list)
 
-        fulfiller = OffLpReSolvingFulfillment(self.graph)
+        fulfiller = OffLpReSolvingFulfillment(self.graph, solver=self.solver)
 
         for n_train_samples in self.train_sample_sizes:
             for sample_id in range(self.n_samples_per_size):
@@ -734,7 +738,7 @@ class Experiment:
         initial_dual_variables = defaultdict(list)
         train_times = defaultdict(list)
 
-        fulfiller = ExtrapolationLpReSolvingFulfillment(self.graph)
+        fulfiller = ExtrapolationLpReSolvingFulfillment(self.graph, solver=self.solver)
 
         for n_train_samples in self.train_sample_sizes:
             for sample_id in range(self.n_samples_per_size):
@@ -778,7 +782,7 @@ class Experiment:
         return policy_output
 
 
-def main(demand_model):
+def main(demand_model, solver='gurobi'):
     """Configure and run the full experiment for a given demand model.
 
     Sets up graph instances, generates training/test data, runs all policies
@@ -855,6 +859,7 @@ def main(demand_model):
     logging.info(f'model_free_parametrized_policies = {model_free_parametrized_policies}')
     logging.info(f'lp_resolving_policies = {lp_resolving_policies}')
     logging.info(f'initial_inventory = {init_inventory}')
+    logging.info(f'solver = {solver}')
 
     include_optimal = False
     if demand_model == 'indep' or demand_model == 'markov':
@@ -941,7 +946,8 @@ def main(demand_model):
                 training_budget_per_parameter,
                 optimal_policies.get(instance_id),
                 training_budget_cap,
-                experiment_dir
+                experiment_dir,
+                solver,
             )
             args_list.append(args)
 
@@ -972,6 +978,7 @@ def main(demand_model):
                 training_budget_per_parameter,
                 training_budget_cap,
                 optimal_policies.get(instance_id),
+                solver=solver,
             )
 
             results[instance_id] = experiment.conduct_experiment()
