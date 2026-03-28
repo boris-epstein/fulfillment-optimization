@@ -74,7 +74,7 @@ class ThresholdsPolicy:
             total_reward += reward
         return total_reward / len(sequences) if sequences else 0.0
 
-    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = 'DE', budget: int = 1000, seed: int = 42):
+    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = 'DE', budget: int = 1000):
         """Optimize threshold parameters using derivative-free optimization.
 
         Returns:
@@ -156,7 +156,7 @@ class TimeSupplyEnhancedMPB:
             total_reward += reward
         return total_reward / len(sequences) if sequences else 0.0
 
-    def train(self, inventory: Inventory, sequences: List[Sequence], optimizer_name="DE", budget=500, seed: int = 42):
+    def train(self, inventory: Inventory, sequences: List[Sequence], optimizer_name="DE", budget=500):
         """Optimize theta and gamma parameters via derivative-free optimization.
 
         Returns:
@@ -241,7 +241,7 @@ class SupplyEnhancedMPB:
             total_reward += reward
         return total_reward / len(sequences) if sequences else 0.0
 
-    def train(self, inventory: Inventory, sequences: List[Sequence], optimizer_name="DE", budget=500, seed: int = 42):
+    def train(self, inventory: Inventory, sequences: List[Sequence], optimizer_name="DE", budget=500):
         """Optimize theta parameters via derivative-free optimization.
 
         Returns:
@@ -323,7 +323,7 @@ class TimeEnhancedMPB:
             total_reward += reward
         return total_reward / len(sequences) if sequences else 0.0
 
-    def train(self, inventory: Inventory, sequences: List[Sequence], optimizer_name="DE", budget=500, seed: int = 42):
+    def train(self, inventory: Inventory, sequences: List[Sequence], optimizer_name="DE", budget=500):
         """Optimize gamma via derivative-free optimization.
 
         Returns:
@@ -447,7 +447,7 @@ class NeuralOpportunityCostPolicy:
             total_reward += reward
         return total_reward / len(sequences)
 
-    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1001, seed: int = 42):
+    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1001):
         """Optimize neural network weights via derivative-free optimization.
 
         Returns:
@@ -567,7 +567,7 @@ class NeuralOpportunityCostWithIDPolicy:
             total_reward += self.fulfill(seq, inventory, weight_vector)
         return total_reward / len(sequences)
 
-    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1000, seed: int = 42):
+    def train(self, inventory: Inventory, train_samples: List[Sequence], optimizer_name: str = "DE", budget: int = 1000):
         """Optimize neural network weights via derivative-free optimization.
 
         Returns:

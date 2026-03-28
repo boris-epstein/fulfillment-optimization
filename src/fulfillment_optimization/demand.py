@@ -95,15 +95,14 @@ class CorrelGenerator:
         """Generate a single demand sequence with random length and node assignments."""
         if self.distribution == 'normal':
             T = max(0, int(round(self.rng.normal(loc=self.mean, scale=self.std_dev))))
-
-        if self.distribution == 'exponential':
+        elif self.distribution == 'exponential':
             T = int(round(self.rng.exponential(scale=self.mean)))
-
-        if self.distribution == 'deterministic':
+        elif self.distribution == 'deterministic':
             T = int(round(self.mean))
-
-        if self.distribution == 'geometric':
+        elif self.distribution == 'geometric':
             T = self.rng.geometric(self.p) - 1
+        else:
+            raise ValueError(f"Unknown distribution '{self.distribution}'")
 
         reqs = self.rng.choice(a=self.demand_nodes, size=T, p=self.weights)
 
@@ -185,8 +184,10 @@ class IndepGenerator:
         for demand_node_id in self.demand_nodes:
             if self.distribution == 'exponential':
                 total_demand[demand_node_id] = int(round(self.rng.exponential(scale=self.means[demand_node_id])))
-            if self.distribution == 'geometric':
+            elif self.distribution == 'geometric':
                 total_demand[demand_node_id] = self.rng.geometric(self.p[demand_node_id]) - 1
+            else:
+                raise ValueError(f"Unknown distribution '{self.distribution}'")
 
             reqs += [demand_node_id for _ in range(total_demand[demand_node_id])]
         self.rng.shuffle(reqs)
@@ -228,9 +229,10 @@ class RWGenerator:
         """Generate a sequence with random-walk-driven demand probabilities."""
         if self.distribution == 'geometric':
             T = self.rng.geometric(self.p) - 1
-
-        if self.distribution == 'deterministic':
+        elif self.distribution == 'deterministic':
             T = int(self.mean)
+        else:
+            raise ValueError(f"Unknown distribution '{self.distribution}'")
 
         walk = np.array([1.0 for demand_node in self.demand_nodes])
 

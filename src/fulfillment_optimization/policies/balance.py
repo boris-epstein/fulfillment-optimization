@@ -30,7 +30,7 @@ class BalancePolicy:
         """
         collected_rewards = 0
         lost_sales = 0
-        total_fulfillments = 0
+
         number_fulfillments = defaultdict(int)
 
         current_inventories = inventory.initial_inventory.copy()
@@ -48,7 +48,7 @@ class BalancePolicy:
                 current_inventories[supply_node_chosen] -= 1
                 number_fulfillments[supply_node_chosen, demand_node.id] += 1
                 collected_rewards += self.graph.edges[supply_node_chosen, demand_node.id].reward
-                total_fulfillments += 1
+
 
         return FulfillmentResult(number_fulfillments, collected_rewards, lost_sales)
 
@@ -58,23 +58,19 @@ class BalancePolicy:
         Returns:
             Supply node ID, or -1 if no supply node has inventory.
         """
-        fractions = {
-            supply_node_id: 1 - extended_division(current_inventories[supply_node_id], inventory.initial_inventory[supply_node_id])
-            for supply_node_id in demand_node.neighbors
-        }
-        pseudo_rewards = [
-            [supply_node_id,
-             self.graph.edges[supply_node_id, demand_node.id].reward * (1 - np.exp(fractions[supply_node_id] - 1))]
-            for supply_node_id in fractions
-        ]
+        best_supply = -1
+        best_score = -float('inf')
 
-        pseudo_rewards.sort(key=lambda x: x[1], reverse=True)
+        for supply_node_id in demand_node.neighbors:
+            if current_inventories[supply_node_id] <= 0:
+                continue
+            used_fraction = 1 - extended_division(current_inventories[supply_node_id], inventory.initial_inventory[supply_node_id])
+            score = self.graph.edges[supply_node_id, demand_node.id].reward * (1 - np.exp(used_fraction - 1))
+            if score > best_score:
+                best_score = score
+                best_supply = supply_node_id
 
-        for supply_node_id, _ in pseudo_rewards:
-            if current_inventories[supply_node_id] > 0:
-                return supply_node_id
-
-        return -1
+        return best_supply
 
 
 class MultiPriceBalancePolicy:
@@ -150,7 +146,7 @@ class MultiPriceBalancePolicy:
         """
         collected_rewards = 0
         lost_sales = 0
-        total_fulfillments = 0
+
         number_fulfillments = defaultdict(int)
 
         current_inventories = inventory.initial_inventory.copy()
@@ -168,7 +164,7 @@ class MultiPriceBalancePolicy:
                 current_inventories[supply_node_chosen] -= 1
                 number_fulfillments[supply_node_chosen, demand_node.id] += 1
                 collected_rewards += self.graph.edges[supply_node_chosen, demand_node.id].reward
-                total_fulfillments += 1
+
 
         return FulfillmentResult(number_fulfillments, collected_rewards, lost_sales)
 
@@ -178,23 +174,19 @@ class MultiPriceBalancePolicy:
         Returns:
             Supply node ID, or -1 if no supply node has inventory.
         """
-        used_fractions = {
-            supply_node_id: 1 - extended_division(current_inventories[supply_node_id], inventory.initial_inventory[supply_node_id])
-            for supply_node_id in demand_node.neighbors
-        }
-        pseudo_rewards = [
-            [supply_node_id,
-             self.graph.edges[supply_node_id, demand_node.id].reward - self.phi(supply_node_id, used_fractions[supply_node_id])]
-            for supply_node_id in used_fractions
-        ]
+        best_supply = -1
+        best_score = -float('inf')
 
-        pseudo_rewards.sort(key=lambda x: x[1], reverse=True)
+        for supply_node_id in demand_node.neighbors:
+            if current_inventories[supply_node_id] <= 0:
+                continue
+            used_fraction = 1 - extended_division(current_inventories[supply_node_id], inventory.initial_inventory[supply_node_id])
+            score = self.graph.edges[supply_node_id, demand_node.id].reward - self.phi(supply_node_id, used_fraction)
+            if score > best_score:
+                best_score = score
+                best_supply = supply_node_id
 
-        for supply_node_id, _ in pseudo_rewards:
-            if current_inventories[supply_node_id] > 0:
-                return supply_node_id
-
-        return -1
+        return best_supply
 
 
 # Backward compatibility aliases

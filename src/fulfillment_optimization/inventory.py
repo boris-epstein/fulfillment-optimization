@@ -15,7 +15,7 @@ class Inventory:
         total_inventory: Sum of all initial inventory units.
     """
 
-    def __init__(self, initial_inventory: Dict[int, int], name='str') -> None:
+    def __init__(self, initial_inventory: Dict[int, int], name: str = 'unnamed') -> None:
         self.name = name
         self.initial_inventory = initial_inventory.copy()
         self.total_inventory = sum(initial_inventory.values())
@@ -267,8 +267,6 @@ class InventoryOptimizer:
             rounded_inventory[supply_node_id] = int(np.floor(rounded_inventory[supply_node_id]))
 
         amount_to_round = np.round(amount_to_round)
-        if amount_to_round > 0:
-            print('Rounding something')
         remainders.sort(reverse=True, key=lambda x: x[1])
 
         if amount_to_round > 0:

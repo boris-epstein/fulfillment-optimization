@@ -93,34 +93,42 @@ class Graph:
             demand_node.priority_lists[list_name] = []
 
     def add_supply_node(self, supply_node_id: int):
-        """Add a supply node to the graph. Prints a warning if the ID already exists."""
+        """Add a supply node to the graph.
+
+        Raises:
+            ValueError: If the supply node ID already exists.
+        """
         if supply_node_id in self.supply_nodes:
-            print('Supply node id already exists')
-        else:
-            self.supply_nodes[supply_node_id] = Node(supply_node_id)
+            raise ValueError(f'Supply node {supply_node_id} already exists')
+        self.supply_nodes[supply_node_id] = Node(supply_node_id)
 
     def add_demand_node(self, demand_node_id: int):
-        """Add a demand node to the graph. Prints a warning if the ID already exists."""
+        """Add a demand node to the graph.
+
+        Raises:
+            ValueError: If the demand node ID already exists.
+        """
         if demand_node_id in self.demand_nodes:
-            print('Demand node id already exists')
-        else:
-            self.demand_nodes[demand_node_id] = DemandNode(demand_node_id)
+            raise ValueError(f'Demand node {demand_node_id} already exists')
+        self.demand_nodes[demand_node_id] = DemandNode(demand_node_id)
 
     def add_edge(self, supply_node_id: int, demand_node_id: int, reward: float):
-        """Add an edge between existing supply and demand nodes with the given reward."""
-        if supply_node_id in self.supply_nodes and demand_node_id in self.demand_nodes:
-            self.edges[supply_node_id, demand_node_id] = Edge(supply_node_id, demand_node_id, reward)
-        else:
-            if supply_node_id not in self.supply_nodes:
-                print('Supply node not in graph')
-            if demand_node_id not in self.demand_nodes:
-                print('Demand node not in graph')
+        """Add an edge between existing supply and demand nodes with the given reward.
+
+        Raises:
+            ValueError: If supply or demand node does not exist in the graph.
+        """
+        if supply_node_id not in self.supply_nodes:
+            raise ValueError(f'Supply node {supply_node_id} not in graph')
+        if demand_node_id not in self.demand_nodes:
+            raise ValueError(f'Demand node {demand_node_id} not in graph')
+        self.edges[supply_node_id, demand_node_id] = Edge(supply_node_id, demand_node_id, reward)
 
 
 class Node:
     """A node in the bipartite graph (used for supply nodes)."""
 
-    def __init__(self, identifier: str, weight: float = 0, x: float = 0, y: float = 0) -> None:
+    def __init__(self, identifier: int, weight: float = 0, x: float = 0, y: float = 0) -> None:
         self.id = identifier
         self.neighbors = set()
         self.x = x
@@ -130,7 +138,7 @@ class Node:
 class DemandNode(Node):
     """A demand-side node that tracks which supply nodes can serve it and their priority ordering."""
 
-    def __init__(self, identifier: str, weight: float = 0, x: float = 0, y: float = 0):
+    def __init__(self, identifier: int, weight: float = 0, x: float = 0, y: float = 0):
         super().__init__(identifier, weight, x, y)
         self.best_supply_nodes = []
         self.priority_lists = {}

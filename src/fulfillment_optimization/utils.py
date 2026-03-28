@@ -28,7 +28,13 @@ def correl_graph(low_reward, high_reward_probability, T, seed=0):
     Returns:
         Tuple of (graph, distribution) where distribution is a
         HiddenMarkovGenerator instance.
+
+    Raises:
+        ValueError: If T is not 6, 12, or 18.
     """
+    if T not in (6, 12, 18):
+        raise ValueError(f"T must be 6, 12, or 18, got {T}")
+
     graph = Graph()
 
     graph.add_supply_node(0)

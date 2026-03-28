@@ -41,7 +41,7 @@ class DualMirrorDescentPolicy:
         """
         collected_rewards = 0
         lost_sales = 0
-        total_fulfillments = 0
+
         number_fulfillments = defaultdict(int)
 
         current_dual_solution = dual_solution.copy()
@@ -59,7 +59,7 @@ class DualMirrorDescentPolicy:
                 current_inventories[supply_node_chosen] -= 1
                 number_fulfillments[supply_node_chosen, demand_node.id] += 1
                 collected_rewards += self.graph.edges[supply_node_chosen, demand_node.id].reward
-                total_fulfillments += 1
+
 
             current_dual_solution = self.dual_update(supply_node_chosen, current_dual_solution, rho, step_size, update_rule)
 
@@ -76,6 +76,9 @@ class DualMirrorDescentPolicy:
              self.graph.edges[supply_node_id, demand_node.id].reward - dual_solution[supply_node_id]]
             for supply_node_id in demand_node.neighbors
         ]
+
+        if not pseudo_rewards:
+            return -1
 
         chosen_supply_node, max_pseudo_reward = max(pseudo_rewards, key=lambda x: x[1])
 
@@ -98,14 +101,14 @@ class DualMirrorDescentPolicy:
 
     def subgradient_descent_update(self, dual_solution, step, step_size):
         """Projected subgradient descent: dual -= step_size * step, clipped to >= 0."""
-        new_dual_solution = [dual_sol_component for dual_sol_component in dual_solution]
+        new_dual_solution = dual_solution.copy()
         for supply_node_id in self.graph.supply_nodes:
             new_dual_solution[supply_node_id] = max(new_dual_solution[supply_node_id] - step_size * step[supply_node_id], 0)
         return new_dual_solution
 
     def multiplicative_weights_update(self, dual_solution, step, step_size):
         """Multiplicative weights: dual *= exp(-step_size * step)."""
-        new_dual_solution = [dual_sol_component for dual_sol_component in dual_solution]
+        new_dual_solution = dual_solution.copy()
         for supply_node_id in self.graph.supply_nodes:
             new_dual_solution[supply_node_id] = new_dual_solution[supply_node_id] * np.exp(-step_size * step[supply_node_id])
         return new_dual_solution

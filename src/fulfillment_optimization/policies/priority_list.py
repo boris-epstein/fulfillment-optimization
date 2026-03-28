@@ -36,7 +36,7 @@ class PriorityListPolicy:
         """
         collected_rewards = 0
         lost_sales = 0
-        total_fulfillments = 0
+
         number_fulfillments = defaultdict(int)
 
         current_inventories = inventory.initial_inventory.copy()
@@ -57,7 +57,7 @@ class PriorityListPolicy:
                 current_inventories[supply_node_id] -= 1
                 number_fulfillments[supply_node_id, demand_node.id] += 1
                 collected_rewards += self.graph.edges[supply_node_id, demand_node.id].reward
-                total_fulfillments += 1
+
                 if verbose:
                     print(f'Demand from {demand_node.id} fulfilled from {supply_node_id}')
             else:

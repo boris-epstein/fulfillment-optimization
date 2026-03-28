@@ -39,7 +39,7 @@ class DPPolicy:
         """
         collected_rewards = 0
         lost_sales = 0
-        total_fulfillments = 0
+
         number_fulfillments = defaultdict(int)
 
         current_inventories = inventory.initial_inventory.copy()
@@ -60,7 +60,7 @@ class DPPolicy:
                 current_inventories[supply_node_chosen] -= 1
                 number_fulfillments[supply_node_chosen, demand_node.id] += 1
                 collected_rewards += self.graph.edges[supply_node_chosen, demand_node.id].reward
-                total_fulfillments += 1
+
 
             t += 1
 
