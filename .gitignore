@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.env/
+
+# Build / packaging artifacts
+dist/
+build/
+*.egg-info/
+
+# Large data or output files
+*.csv
+*.log
+*.out
+*.tmp
+*.zip
+*.xlsx
+
+# Notebooks
+*.ipynb
+*.ipynb_checkpoints/
+
+# OS files
+.DS_Store
