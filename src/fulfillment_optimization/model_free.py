@@ -1,7 +1,7 @@
-from Graph import Graph
-from Demand import Sequence
+from .graph import Graph
+from .demand import Sequence
 from collections import defaultdict
-from FulfillmentOptimization import Inventory, MultiPriceBalanceFulfillment
+from .fulfillment import Inventory, MultiPriceBalanceFulfillment
 from typing import List
 
 import nevergrad as ng

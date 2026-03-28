@@ -1,5 +1,5 @@
-from Graph import Graph
-from Demand import HiddenMarkovGenerator
+from .graph import Graph
+from .demand import HiddenMarkovGenerator
 
 import numpy as np
 

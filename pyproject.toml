@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fulfillment-optimization"
+version = "0.1.0"
+description = "Algorithms for online bipartite matching applied to fulfillment optimization"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Boris Epstein"},
+    {name = "Will Ma"},
+]
+dependencies = [
+    "numpy",
+]
+
+[project.optional-dependencies]
+gurobi = ["gurobipy"]
+highs = ["highspy"]
+ml = ["nevergrad", "torch"]
+all = ["gurobipy", "highspy", "nevergrad", "torch"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

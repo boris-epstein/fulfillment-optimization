@@ -1,5 +1,5 @@
-from Demand import Sequence
-from Graph import Graph
+from .demand import Sequence
+from .graph import Graph
 from typing import Dict, List
 
 

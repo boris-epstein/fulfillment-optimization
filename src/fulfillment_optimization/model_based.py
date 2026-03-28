@@ -2,9 +2,9 @@ from collections import defaultdict
 from itertools import combinations, product
 from typing import Dict, List
 
-from Demand import Sequence, Request, MarkovianGenerator
-from Graph import Graph
-from FulfillmentOptimization import Inventory
+from .demand import Sequence, Request
+from .graph import Graph
+from .fulfillment import Inventory
 
 import numpy as np
 

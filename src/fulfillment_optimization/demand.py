@@ -2,7 +2,6 @@ import numpy as np
 from collections import defaultdict
 from typing import Dict, List
 
-from Graph import Node
 
 
 class Request:
@@ -43,6 +42,8 @@ class Sequence:
         self.leftover_aggregate_demand = {}
         T = self.length
         self.leftover_aggregate_demand[T] = defaultdict(int)
+        if T == 0:
+            return
         self.leftover_aggregate_demand[T - 1] = defaultdict(int)
         self.leftover_aggregate_demand[T - 1][self.requests[T - 1].demand_node] += 1
 

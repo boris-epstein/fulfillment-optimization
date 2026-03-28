@@ -1,6 +1,6 @@
-from Graph import Graph, DemandNode, Edge, RandomGraphGenerator
-from Demand import CorrelGenerator, Sequence, Request
-from MathPrograms import MathPrograms
+from .graph import Graph, DemandNode
+from .demand import CorrelGenerator, Sequence, Request
+from .math_programs import MathPrograms
 from collections import defaultdict
 import numpy as np
 from typing import List, Dict, Union, Tuple

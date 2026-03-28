@@ -1,13 +1,20 @@
+# Paper-specific files (NEVER commit to public repo)
+paper/
 
-# Ignore Python cache
+# Python cache
 __pycache__/
 *.pyc
 
-# Ignore virtual environments
+# Virtual environments
 venv/
 .env/
 
-# Ignore large data or output files
+# Build / packaging artifacts
+dist/
+build/
+*.egg-info/
+
+# Large data or output files
 *.csv
 *.log
 *.out
@@ -15,7 +22,9 @@ venv/
 *.zip
 *.xlsx
 
-*ipynb
-
-# Ignore notebooks' outputs (optional)
+# Notebooks
+*.ipynb
 *.ipynb_checkpoints/
+
+# OS files
+.DS_Store

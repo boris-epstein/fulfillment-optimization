@@ -8,44 +8,47 @@ The core research question: how do different fulfillment policies perform under 
 
 ## Architecture
 
-All source code lives in `Code/`. There is no package structure — modules import each other directly.
+The library is packaged as `fulfillment_optimization` under `src/`. Paper-specific experiments, plots, and documents live in `paper/` (gitignored, never committed).
 
-### Key Modules
+### Package Modules (`src/fulfillment_optimization/`)
 
-- **Graph.py** — Bipartite graph data structures (`Graph`, `Node`, `DemandNode`, `Edge`) and random graph generation
-- **Demand.py** — Demand sequence generation under various stochastic models (independent, Markov, random walk, HMM, correlated)
-- **FulfillmentOptimization.py** — Core fulfillment policies: myopic, balance, multi-price balance, LP re-solving (fluid, offline, extrapolation), dual mirror descent, and policy-based fulfillment
-- **MathPrograms.py** — LP formulations (fluid LP, offline LP) with a solver abstraction layer supporting Gurobi and HiGHS backends
-- **ModelBased.py** — Dynamic programming solutions (independent DP, Markovian DP) and distribution estimation from samples
-- **ModelFree.py** — Parametrized policies optimized via Nevergrad: threshold-based, enhanced balance variants, neural opportunity cost
-- **experiments.py** — Experiment orchestration: instance generation, parallel execution, result collection, CSV output
+- **graph.py** — Bipartite graph data structures (`Graph`, `Node`, `DemandNode`, `Edge`) and random graph generation
+- **demand.py** — Demand sequence generation under various stochastic models (independent, Markov, random walk, HMM, correlated)
+- **fulfillment.py** — Core fulfillment policies: myopic, balance, multi-price balance, LP re-solving (fluid, offline, extrapolation), dual mirror descent, and policy-based fulfillment
+- **math_programs.py** — LP formulations (fluid LP, offline LP) with a solver abstraction layer supporting Gurobi and HiGHS backends
+- **model_based.py** — Dynamic programming solutions (independent DP, Markovian DP) and distribution estimation from samples
+- **model_free.py** — Parametrized policies optimized via Nevergrad: threshold-based, enhanced balance variants, neural opportunity cost (requires `[ml]` extras)
 - **utils.py** — Helper for constructing the "correlated" demand graph (HMM-based)
+
+### Paper Files (`paper/`, gitignored)
+
+- `paper_experiments.py`, `experiments.py` — Experiment scripts
+- `plotter.py`, `patch_fluid.py` — Plotting and patching utilities
+- `*.tex`, `*.md` — Paper documents
+- `figures/`, `results/` — Generated outputs
 
 ## Dependencies
 
-- `numpy` — numerical computation
-- `gurobipy` — LP/optimization solver (requires Gurobi license; default backend)
-- `highspy` — HiGHS LP solver (free/open-source alternative backend)
-- `sortedcontainers` — sorted data structures
-- `nevergrad` — derivative-free optimization (model-free policy training)
-- `torch` — neural network policies
-- `matplotlib` — plotting (used only in `__main__` blocks)
+Core: `numpy`
 
-## Running
+Optional (install via extras):
+- `pip install fulfillment-optimization[gurobi]` — Gurobi LP solver
+- `pip install fulfillment-optimization[highs]` — HiGHS LP solver (free/open-source)
+- `pip install fulfillment-optimization[ml]` — Nevergrad + PyTorch for model-free policies
+- `pip install fulfillment-optimization[all]` — everything
+
+## Installation
 
 ```bash
-cd Code
-python experiments.py
+pip install -e .           # core only
+pip install -e ".[all]"    # with all optional dependencies
 ```
 
-The `main()` function in `experiments.py` configures and runs the full experiment. Key parameters are set at the top of `main()`:
-- `demand_model`: one of `'indep'`, `'markov'`, `'rw'`, `'correl'`
-- `solver`: `'gurobi'` (default) or `'highs'` — LP solver backend
-- `n_supply_nodes`, `n_demand_nodes`: graph size
-- `train_sample_sizes`: list of training set sizes to evaluate
-- `parallel`: whether to use multiprocessing
+## Usage
 
-Results are written to a CSV file and logs go to `logs/`.
+```python
+from fulfillment_optimization import Graph, Inventory, Fulfillment, MathPrograms
+```
 
 ## Conventions
 
